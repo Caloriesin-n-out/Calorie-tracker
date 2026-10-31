@@ -21,7 +21,7 @@ Any change pushed to `main` is published by GitHub Pages in 1 to 2 minutes. The 
 1. Create an empty public repository on github.com named `Calorie-tracker` (no README, no licence).
 2. Push this folder to it (Claude does this for you).
 3. Repo **Settings → Pages → Build and deployment**: Source **Deploy from a branch**, branch `main`, folder `/ (root)`, Save.
-4. Your app address is `https://matthias-sport.github.io/Calorie-tracker/` (the repo name is case-sensitive in the address). The repo lives in the `Matthias-Sport` organisation, not under `mhoman05`, because Chrome on the Pixel kept a stale "already installed" record for the `mhoman05.github.io` address that blocked installing; a different address avoids it.
+4. Your app address is `https://caloriesin-n-out.github.io/Calorie-tracker/` (the repo name is case-sensitive in the address). The repo lives in its own `Caloriesin-n-out` organisation so the app has an address of its own; Chrome on the Pixel kept refusing to install from the `mhoman05` and `Matthias-Sport` addresses with an "already installed" message.
 
 ### 2. Google Cloud: enable the API and create credentials
 1. Go to <https://console.cloud.google.com> and create a project.

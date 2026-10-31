@@ -4,7 +4,7 @@ compatibility_date = "2026-10-01"
 
 [vars]
 # Exact address of the app on GitHub Pages (origin only, no path). Comma-separate to allow more than one.
-ALLOWED_ORIGIN = "https://matthias-sport.github.io"
+ALLOWED_ORIGIN = "https://caloriesin-n-out.github.io"
 # SCOPES = "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly ..."   # only if Google rejects the defaults
 
 # Create with:  npx wrangler kv namespace create TOKENS   then paste the id here
