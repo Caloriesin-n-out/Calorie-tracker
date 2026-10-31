@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Intake">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16181a" media="(prefers-color-scheme: dark)">
+<title>Intake vs Burn</title>
+<style>
+:root {
+  --bg: #f6f5f2; --card: #ffffff; --ink: #1d2124; --muted: #6b7378; --line: #e5e3de;
+  --eat: #d9661a; --eat-soft: #fbe9db; --burn: #0e8a80; --burn-soft: #d9f0ed;
+  --accent: #1d2124; --accent-ink: #ffffff; --danger: #b3261e; --shadow: 0 1px 2px rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #16181a; --card: #1f2224; --ink: #eceae6; --muted: #98a0a5; --line: #2e3336;
+    --eat: #f08a3c; --eat-soft: #3a2a1d; --burn: #3fbdb1; --burn-soft: #17332f;
+    --accent: #eceae6; --accent-ink: #16181a; --danger: #f2736b; --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #16181a; --card: #1f2224; --ink: #eceae6; --muted: #98a0a5; --line: #2e3336;
+  --eat: #f08a3c; --eat-soft: #3a2a1d; --burn: #3fbdb1; --burn-soft: #17332f;
+  --accent: #eceae6; --accent-ink: #16181a; --danger: #f2736b; --shadow: none;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+body { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+button { font: inherit; color: inherit; cursor: pointer; }
+input, select { font: inherit; color: inherit; }
+.wrap { max-width: 560px; margin: 0 auto; padding: calc(12px + env(safe-area-inset-top)) 16px 0; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; box-shadow: var(--shadow); }
+.stack > * + * { margin-top: 12px; }
+
+/* top bar */
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.datenav { display: flex; align-items: center; gap: 4px; }
+.iconbtn { width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); font-size: 20px; line-height: 1; }
+.iconbtn:disabled { opacity: .35; cursor: default; }
+.datelabel { min-width: 120px; text-align: center; font-weight: 600; }
+.pill { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 6px 12px; font-size: 13px; color: var(--muted); }
+.pill.bad { color: var(--danger); border-color: var(--danger); }
+
+/* summary */
+.sumgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; }
+.sumgrid .lbl { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.sumgrid .val { font-size: 28px; font-weight: 700; margin-top: 2px; }
+.sumgrid .unit { font-size: 12px; color: var(--muted); }
+.eat-c { color: var(--eat); } .burn-c { color: var(--burn); }
+.bars { margin-top: 14px; display: grid; gap: 6px; }
+.bar { height: 10px; border-radius: 6px; background: var(--line); overflow: hidden; }
+.bar > i { display: block; height: 100%; border-radius: 6px; }
+.bar.eat > i { background: var(--eat); } .bar.burn > i { background: var(--burn); }
+.netline { margin-top: 12px; text-align: center; font-size: 14px; color: var(--muted); }
+.netline b { color: var(--ink); }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+.stat .lbl { font-size: 12px; color: var(--muted); }
+.stat .val { font-size: 20px; font-weight: 650; margin-top: 2px; }
+.stat .sub { font-size: 12px; color: var(--muted); }
+
+/* meals */
+.mealhead { display: flex; align-items: center; justify-content: space-between; margin: 4px 2px 6px; }
+.mealhead h3 { margin: 0; font-size: 15px; }
+.addmini { border: 0; background: none; color: var(--eat); font-weight: 600; font-size: 14px; padding: 6px 4px; }
+.entry { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
+  text-align: left; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.entry + .entry { margin-top: 6px; }
+.entry .name { overflow: hidden; text-overflow: ellipsis; }
+.entry .qty { color: var(--muted); font-size: 13px; margin-left: 6px; }
+.empty { color: var(--muted); font-size: 14px; padding: 6px 2px 2px; }
+
+/* fab + nav */
+.fab { position: fixed; right: 16px; bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 5;
+  background: var(--eat); color: #fff; border: 0; border-radius: 999px; padding: 14px 20px; font-weight: 650;
+  box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+.nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--card); border-top: 1px solid var(--line);
+  display: flex; padding-bottom: env(safe-area-inset-bottom); }
+.nav button { flex: 1; border: 0; background: none; padding: 12px 0 14px; font-size: 13px; color: var(--muted); }
+.nav button.on { color: var(--ink); font-weight: 650; }
+
+/* sheet */
+.scrim { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 20; display: flex; align-items: flex-end; justify-content: center; }
+.sheet { width: 100%; max-width: 560px; max-height: 92vh; overflow: auto; background: var(--bg); border-radius: 20px 20px 0 0;
+  padding: 16px 16px calc(20px + env(safe-area-inset-bottom)); }
+.sheet h2 { margin: 0 0 12px; font-size: 18px; }
+.row { display: flex; gap: 8px; }
+.field { width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.field:focus { outline: 2px solid var(--eat); outline-offset: -1px; }
+.btn { border: 0; border-radius: 12px; background: var(--accent); color: var(--accent-ink); padding: 12px 18px; font-weight: 650; }
+.btn.eat { background: var(--eat); color: #fff; }
+.btn.ghost { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+.btn.danger { background: none; color: var(--danger); border: 1px solid var(--line); }
+.btn:disabled { opacity: .4; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.chip { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 6px 12px; font-size: 14px; }
+.chip.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.sugg { margin-top: 12px; }
+.sugg .hd { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 10px 2px 6px; }
+.stepper { display: flex; align-items: center; gap: 14px; }
+.stepper button { width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); font-size: 22px; }
+.lbl2 { font-size: 13px; color: var(--muted); margin: 12px 2px 4px; display: block; }
+
+/* trends */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--card); }
+.seg button { border: 0; background: none; padding: 8px 14px; font-size: 14px; color: var(--muted); }
+.seg button.on { background: var(--ink); color: var(--bg); font-weight: 650; }
+.legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; }
+svg text { fill: var(--muted); font-size: 10px; font-family: inherit; }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; font-size: 15px; }
+.kv .k { color: var(--muted); }
+
+/* settings */
+.set h3 { margin: 0 0 8px; font-size: 15px; }
+.set p { margin: 6px 0; font-size: 14px; }
+.errbox { background: var(--eat-soft); border-radius: 10px; padding: 10px 12px; font-size: 13px; word-break: break-word; margin-top: 8px; }
+pre.raw { white-space: pre-wrap; word-break: break-all; font-size: 11px; max-height: 240px; overflow: auto; background: var(--bg); padding: 8px; border-radius: 8px; }
+
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(140px + env(safe-area-inset-bottom)); z-index: 30;
+  background: var(--ink); color: var(--bg); border-radius: 12px; padding: 10px 14px; display: flex; gap: 14px; align-items: center; font-size: 14px; }
+.toast button { background: none; border: 0; color: var(--eat); font-weight: 700; padding: 0; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<nav class="nav" id="nav"></nav>
+<div id="overlay"></div>
+<div id="toast"></div>
+
+<script>
+'use strict';
+const BUILD = '2026-10-31.1';
+const STORE_KEY = 'intake.v1';
+const MEALS = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
+const KCAL_PER_KG = 7700;
+
+/* ---------- built-in staples: [name, kcal/100g, serving g, serving label] ---------- */
+const STAPLES = [
+  ['Egg', 143, 50, '1 egg'], ['Banana', 89, 118, '1 medium'], ['Apple', 52, 182, '1 medium'], ['Orange', 47, 131, '1 medium'],
+  ['Bread, white', 265, 30, '1 slice'], ['Bread, wholemeal', 247, 32, '1 slice'], ['Rice, cooked', 130, 150, '1 cup'],
+  ['Pasta, cooked', 158, 140, '1 portion'], ['Oats, dry', 389, 40, '40 g'], ['Potato, boiled', 87, 150, '1 medium'],
+  ['Sweet potato', 86, 130, '1 medium'], ['Chicken breast, cooked', 165, 120, '1 breast'], ['Salmon, cooked', 206, 120, '1 fillet'],
+  ['Beef mince, cooked', 250, 100, '100 g'], ['Tuna, canned', 116, 100, '1 can'], ['Tofu', 76, 100, '100 g'],
+  ['Cheddar cheese', 403, 30, '30 g'], ['Milk, whole', 61, 240, '1 glass'], ['Milk, skimmed', 34, 240, '1 glass'],
+  ['Greek yogurt', 97, 150, '1 pot'], ['Butter', 717, 10, '1 tsp'], ['Olive oil', 884, 14, '1 tbsp'], ['Avocado', 160, 100, 'half'],
+  ['Broccoli', 34, 90, '1 cup'], ['Carrot', 41, 60, '1 medium'], ['Tomato', 18, 120, '1 medium'], ['Cucumber', 15, 100, '100 g'],
+  ['Spinach', 23, 30, '1 handful'], ['Onion', 40, 110, '1 medium'], ['Lentils, cooked', 116, 150, '1 cup'],
+  ['Chickpeas, cooked', 164, 120, '1/2 cup'], ['Almonds', 579, 28, '1 handful'], ['Peanut butter', 588, 32, '2 tbsp'],
+  ['Dark chocolate', 546, 20, '2 squares'], ['Sugar', 387, 4, '1 tsp'], ['Coffee, black', 1, 240, '1 cup'],
+  ['Beer', 43, 330, '1 bottle'], ['Wine', 83, 150, '1 glass'], ['Pizza', 266, 107, '1 slice'], ['Hummus', 166, 30, '2 tbsp'],
+].map(([name, per100, g, label]) => ({ name: `${name} (${label})`, kcal: Math.round(per100 * g / 100) }));
+
+/* ---------- state ---------- */
+let S = load();
+let view = 'today';
+let viewDate = ymd(new Date());
+let trendDays = 14;
+
+function blank() { return { entries: {}, fit: {}, settings: { baseUrl: '', appKey: '' }, sync: null }; }
+function load() {
+  try { return Object.assign(blank(), JSON.parse(localStorage.getItem(STORE_KEY) || '{}')); }
+  catch { return blank(); }
+}
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
+  catch (e) { toast('Could not save: browser storage is full or blocked.'); }
+}
+
+/* ---------- helpers ---------- */
+function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function parseYmd(s) { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); }
+function addDays(s, n) { const d = parseYmd(s); d.setDate(d.getDate() + n); return ymd(d); }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function uid() { return (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()) + Math.random().toString(16).slice(2); }
+function fmt(n) { return Math.round(n).toLocaleString(); }
+function signed(n) { return (n > 0 ? '+' : n < 0 ? '−' : '') + fmt(Math.abs(n)); }
+function dur(min) { return `${Math.floor(min / 60)}h ${String(Math.round(min % 60)).padStart(2, '0')}m`; }
+function defaultMeal() { const h = new Date().getHours(); return h < 11 ? 'Breakfast' : h < 15 ? 'Lunch' : h < 21 ? 'Dinner' : 'Snacks'; }
+function dayLabel(s) {
+  const t = ymd(new Date());
+  if (s === t) return 'Today';
+  if (s === addDays(t, -1)) return 'Yesterday';
+  return parseYmd(s).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+/* ---------- food log model ----------
+   Entries hold a per-unit kcal and a quantity. Deletes are tombstones so nothing
+   (import, demo removal) can resurrect a deleted item. Re-logging the same food
+   in the same meal/day bumps quantity instead of creating a duplicate row. */
+function liveEntries(date) { return Object.values(S.entries).filter(e => !e.deleted && e.date === date); }
+function eaten(date) { return liveEntries(date).reduce((a, e) => a + e.unitKcal * e.qty, 0); }
+function identity(e) { return `${e.date}|${e.meal}|${e.name.trim().toLowerCase()}|${e.unitKcal}`; }
+
+function logFood({ date, meal, name, unitKcal }) {
+  const probe = { date, meal, name, unitKcal };
+  const hit = Object.values(S.entries).find(e => !e.deleted && identity(e) === identity(probe));
+  let id;
+  if (hit) { hit.qty += 1; hit.updatedAt = Date.now(); id = hit.id; }
+  else {
+    id = uid();
+    S.entries[id] = { id, date, meal, name: name.trim(), unitKcal, qty: 1, createdAt: Date.now(), updatedAt: Date.now() };
+  }
+  save();
+  return { id, merged: !!hit };
+}
+function recents() {
+  const seen = new Map();
+  Object.values(S.entries).filter(e => !e.deleted && !String(e.id).startsWith('demo-'))
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .forEach(e => { const k = `${e.name.toLowerCase()}|${e.unitKcal}`; if (!seen.has(k)) seen.set(k, { name: e.name, kcal: e.unitKcal }); });
+  return [...seen.values()].slice(0, 30);
+}
+
+/* ---------- Fitbit data (cached per day, written by sync) ---------- */
+function fitDay(date) { return S.fit[date] || {}; }
+function burned(date) { const v = fitDay(date).caloriesOut; return typeof v === 'number' ? v : null; }
+
+function baseUrl() {
+  const b = (S.settings.baseUrl || '').trim().replace(/\/$/, '');
+  return /^https?:\/\//.test(b) ? b : null;
+}
+async function api(path, opts = {}) {
+  const base = baseUrl();
+  if (base === null) throw new Error('Enter your Worker address in Settings first (it starts with https://).');
+  const res = await fetch(base + path, { ...opts, headers: { ...(opts.headers || {}), 'X-App-Key': S.settings.appKey } });
+  let body = null;
+  try { body = await res.json(); } catch { /* non-JSON */ }
+  if (!res.ok) throw new Error((body && body.error) || `Server returned ${res.status}`);
+  return body;
+}
+
+let syncing = false;
+async function sync(days = 14) {
+  if (syncing) return;
+  if (!S.settings.appKey) { S.sync = { at: Date.now(), ok: false, message: 'Not set up yet. Open Settings to connect.' }; save(); render(); return; }
+  syncing = true; render();
+  try {
+    const to = ymd(new Date());
+    const out = await api(`/api/days?from=${addDays(to, -(days - 1))}&to=${to}`);
+    for (const [date, vals] of Object.entries(out.days || {})) S.fit[date] = Object.assign(S.fit[date] || {}, vals);
+    const errs = out.errors || [];
+    S.sync = {
+      at: Date.now(),
+      ok: errs.length === 0,
+      partial: errs.length > 0 && Object.keys(out.days || {}).length > 0,
+      needsReconnect: !!out.needsReconnect,
+      message: errs.length ? errs.map(e => `${e.type}: ${e.message}`).join('\n') : 'Everything updated.',
+    };
+  } catch (e) {
+    S.sync = { at: Date.now(), ok: false, message: e.message || String(e), needsReconnect: /reconnect/i.test(e.message || '') };
+  }
+  syncing = false; save(); render();
+}
+
+/* ---------- rendering ---------- */
+const $ = id => document.getElementById(id);
+
+function render() {
+  $('nav').innerHTML = [['today', 'Today'], ['trends', 'Trends'], ['settings', 'Settings']]
+    .map(([k, l]) => `<button data-v="${k}" class="${view === k ? 'on' : ''}">${l}</button>`).join('');
+  $('nav').querySelectorAll('button').forEach(b => b.onclick = () => { view = b.dataset.v; render(); window.scrollTo(0, 0); });
+  const app = $('app');
+  if (view === 'today') app.innerHTML = todayHtml();
+  else if (view === 'trends') app.innerHTML = trendsHtml();
+  else app.innerHTML = settingsHtml();
+  bind(app);
+}
+
+function syncPill() {
+  if (syncing) return `<button class="pill" data-act="sync">Syncing…</button>`;
+  const s = S.sync;
+  if (!s) return `<button class="pill" data-act="sync">Not synced</button>`;
+  const t = new Date(s.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (s.ok) return `<button class="pill" data-act="sync">Synced ${t}</button>`;
+  return `<button class="pill bad" data-act="goto-settings">${s.partial ? 'Partial sync' : 'Sync failed'} · details</button>`;
+}
+
+function todayHtml() {
+  const isToday = viewDate === ymd(new Date());
+  const inK = eaten(viewDate), outK = burned(viewDate), f = fitDay(viewDate);
+  const max = Math.max(inK, outK || 0, 1);
+  const net = outK === null ? null : inK - outK;
+  const meals = MEALS.map(m => {
+    const es = liveEntries(viewDate).filter(e => e.meal === m).sort((a, b) => a.createdAt - b.createdAt);
+    const sub = es.reduce((a, e) => a + e.unitKcal * e.qty, 0);
+    return `<section>
+      <div class="mealhead"><h3>${m} <span class="muted num" style="font-weight:400">${es.length ? fmt(sub) + ' kcal' : ''}</span></h3>
+        <button class="addmini" data-add="${m}">+ Add</button></div>
+      ${es.length ? es.map(e => `<button class="entry" data-edit="${e.id}">
+          <span class="name">${esc(e.name)}${e.qty > 1 ? `<span class="qty">× ${e.qty}</span>` : ''}</span>
+          <span class="num">${fmt(e.unitKcal * e.qty)}</span></button>`).join('') : ''}
+    </section>`;
+  }).join('');
+  return `
+  <div class="topbar">
+    <div class="datenav">
+      <button class="iconbtn" data-act="prev" aria-label="Previous day">‹</button>
+      <div class="datelabel">${dayLabel(viewDate)}</div>
+      <button class="iconbtn" data-act="next" aria-label="Next day" ${isToday ? 'disabled' : ''}>›</button>
+    </div>${syncPill()}
+  </div>
+  <div class="stack">
+    <div class="card">
+      <div class="sumgrid">
+        <div><div class="lbl">Eaten</div><div class="val num eat-c">${fmt(inK)}</div><div class="unit">kcal</div></div>
+        <div><div class="lbl">Burned</div><div class="val num burn-c">${outK === null ? '—' : fmt(outK)}</div><div class="unit">kcal${isToday && outK !== null ? ' so far' : ''}</div></div>
+        <div><div class="lbl">Net</div><div class="val num">${net === null ? '—' : signed(net)}</div><div class="unit">${net === null ? 'no burn data' : net <= 0 ? 'deficit' : 'surplus'}</div></div>
+      </div>
+      <div class="bars">
+        <div class="bar eat"><i style="width:${(inK / max) * 100}%"></i></div>
+        <div class="bar burn"><i style="width:${((outK || 0) / max) * 100}%"></i></div>
+      </div>
+      ${outK === null ? `<div class="netline">Burned calories appear once your Fitbit is connected in Settings.</div>` : ''}
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="lbl">Steps</div><div class="val num">${f.steps != null ? fmt(f.steps) : '—'}</div></div>
+      <div class="stat"><div class="lbl">Sleep</div><div class="val num">${f.sleepMinutes != null ? dur(f.sleepMinutes) : '—'}</div>
+        <div class="sub">${f.sleepDeepMin != null ? `deep ${Math.round(f.sleepDeepMin)}m · REM ${Math.round(f.sleepRemMin || 0)}m` : '&nbsp;'}</div></div>
+      <div class="stat"><div class="lbl">Resting HR</div><div class="val num">${f.restingHr != null ? Math.round(f.restingHr) : '—'}</div><div class="sub">${f.restingHr != null ? 'bpm' : '&nbsp;'}</div></div>
+    </div>
+    ${meals}
+  </div>
+  <button class="fab" data-add="${defaultMeal()}">+ Add food</button>`;
+}
+
+function trendsHtml() {
+  const today = ymd(new Date());
+  const days = [];
+  for (let i = trendDays; i >= 1; i--) days.push(addDays(today, -i)); // completed days only
+  const pts = days.map(d => ({ d, i: liveEntries(d).length ? eaten(d) : null, o: burned(d) }));
+  const both = pts.filter(p => p.i !== null && p.o !== null);
+  const eatenDays = pts.filter(p => p.i !== null), burnDays = pts.filter(p => p.o !== null);
+  const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+  const aIn = avg(eatenDays.map(p => p.i)), aOut = avg(burnDays.map(p => p.o));
+  const netTotal = both.reduce((a, p) => a + (p.i - p.o), 0);
+  const aNet = both.length ? netTotal / both.length : null;
+
+  const W = 340, H = 170, padL = 30, padB = 20, padT = 8, plotH = H - padB - padT, plotW = W - padL - 4;
+  const top = Math.max(500, ...pts.map(p => Math.max(p.i || 0, p.o || 0)));
+  const step = top <= 2000 ? 500 : 1000;
+  const niceTop = Math.ceil(top / step) * step;
+  const slot = plotW / pts.length, bw = Math.max(2, Math.min(10, slot * 0.38));
+  const y = v => padT + plotH - (v / niceTop) * plotH;
+  let svg = '';
+  for (let g = 0; g <= niceTop; g += step) {
+    svg += `<line x1="${padL}" x2="${W - 4}" y1="${y(g)}" y2="${y(g)}" stroke="var(--line)" stroke-width="1"/><text x="${padL - 4}" y="${y(g) + 3}" text-anchor="end">${fmt(g)}</text>`;
+  }
+  pts.forEach((p, k) => {
+    const cx = padL + slot * k + slot / 2;
+    if (p.i !== null) svg += `<rect x="${cx - bw - 0.5}" y="${y(p.i)}" width="${bw}" height="${plotH + padT - y(p.i)}" rx="2" fill="var(--eat)"/>`;
+    if (p.o !== null) svg += `<rect x="${cx + 0.5}" y="${y(p.o)}" width="${bw}" height="${plotH + padT - y(p.o)}" rx="2" fill="var(--burn)"/>`;
+    const label = trendDays <= 14 || k % 5 === 0 ? parseYmd(p.d).getDate() : '';
+    if (label !== '') svg += `<text x="${cx}" y="${H - 6}" text-anchor="middle">${label}</text>`;
+  });
+
+  return `
+  <div class="topbar"><h2 style="margin:0;font-size:20px">Trends</h2>${syncPill()}</div>
+  <div class="stack">
+    <div class="seg">${[7, 14, 30].map(n => `<button data-trend="${n}" class="${trendDays === n ? 'on' : ''}">${n} days</button>`).join('')}</div>
+    <div class="card">
+      <svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Calories eaten and burned per day">${svg}</svg>
+      <div class="legend"><span><i style="background:var(--eat)"></i>Eaten</span><span><i style="background:var(--burn)"></i>Burned</span></div>
+    </div>
+    <div class="card">
+      <div class="kv num">
+        <span class="k">Avg eaten (${eatenDays.length} logged days)</span><span class="eat-c"><b>${aIn === null ? '—' : fmt(aIn) + ' kcal'}</b></span>
+        <span class="k">Avg burned (${burnDays.length} days)</span><span class="burn-c"><b>${aOut === null ? '—' : fmt(aOut) + ' kcal'}</b></span>
+        <span class="k">Avg net per day</span><b>${aNet === null ? '—' : signed(aNet) + ' kcal'}</b>
+        <span class="k">Total net (${both.length} days)</span><b>${both.length ? signed(netTotal) + ' kcal' : '—'}</b>
+        <span class="k">Rough weight effect</span><b>${both.length ? (netTotal / KCAL_PER_KG >= 0 ? '+' : '−') + Math.abs(netTotal / KCAL_PER_KG).toFixed(2) + ' kg' : '—'}</b>
+      </div>
+      <p class="muted" style="font-size:12px;margin:10px 0 0">Today is left out because it isn't finished. Days where you logged no food are skipped rather than counted as zero. The weight effect is an estimate at 7,700 kcal per kg, not a measurement.</p>
+    </div>
+  </div>`;
+}
+
+function settingsHtml() {
+  const s = S.sync;
+  const nDemo = Object.keys(S.entries).filter(k => k.startsWith('demo-')).length;
+  return `
+  <div class="topbar"><h2 style="margin:0;font-size:20px">Settings</h2></div>
+  <div class="stack set">
+    <div class="card">
+      <h3>Google Health connection</h3>
+      <label class="lbl2">Worker address (printed when you deployed the Worker)</label>
+      <input class="field" id="baseUrl" inputmode="url" autocapitalize="off" value="${esc(S.settings.baseUrl)}" placeholder="https://intake-vs-burn.yourname.workers.dev">
+      <label class="lbl2">App key (the APP_KEY you set on the Worker)</label>
+      <input class="field" id="appKey" type="password" autocomplete="off" value="${esc(S.settings.appKey)}" placeholder="paste your app key">
+      <div class="row" style="margin-top:12px;flex-wrap:wrap">
+        <button class="btn" data-act="save-conn">Save</button>
+        <button class="btn ghost" data-act="connect">Connect Google Health</button>
+        <button class="btn ghost" data-act="check">Check connection</button>
+        <button class="btn ghost" data-act="sync-30">Sync last 30 days</button>
+      </div>
+      <div id="checkOut"></div>
+      ${s ? `<div class="errbox" style="${s.ok ? 'background:var(--burn-soft)' : ''}"><b>Last sync ${new Date(s.at).toLocaleString()}:</b><br>${esc(s.message).replace(/\n/g, '<br>')}${s.needsReconnect ? '<br><b>Google needs you to connect again. Tap “Connect Google Health”.</b>' : ''}</div>` : ''}
+    </div>
+    <div class="card">
+      <h3>Your data</h3>
+      <p class="muted">Your food log lives on this device. Export a backup now and then.</p>
+      <div class="row" style="flex-wrap:wrap">
+        <button class="btn ghost" data-act="export">Export backup</button>
+        <button class="btn ghost" data-act="import">Import backup</button>
+        ${nDemo ? `<button class="btn ghost" data-act="demo-off">Remove demo data</button>` : `<button class="btn ghost" data-act="demo-on">Load demo data</button>`}
+      </div>
+      <input type="file" id="importFile" accept="application/json" hidden>
+    </div>
+    <div class="card">
+      <h3>About</h3>
+      <p class="muted">Build <b>${BUILD}</b></p>
+      <button class="btn ghost" data-act="force">Force refresh app</button>
+      <p class="muted" style="font-size:12px">Clears cached files and reloads. Your food log is not touched.</p>
+    </div>
+  </div>`;
+}
+
+/* ---------- events ---------- */
+function bind(root) {
+  root.querySelectorAll('[data-add]').forEach(b => b.onclick = () => openAdd(b.dataset.add));
+  root.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openEdit(b.dataset.edit));
+  root.querySelectorAll('[data-trend]').forEach(b => b.onclick = () => { trendDays = +b.dataset.trend; render(); });
+  root.querySelectorAll('[data-act]').forEach(b => b.onclick = () => act(b.dataset.act));
+}
+
+async function act(a) {
+  if (a === 'prev') { viewDate = addDays(viewDate, -1); render(); }
+  else if (a === 'next') { viewDate = addDays(viewDate, 1); render(); }
+  else if (a === 'sync') sync();
+  else if (a === 'sync-30') { saveConn(); sync(30); }
+  else if (a === 'goto-settings') { view = 'settings'; render(); }
+  else if (a === 'save-conn') { saveConn(); toast('Saved'); }
+  else if (a === 'connect') {
+    saveConn();
+    const base = baseUrl();
+    if (base === null) return toast('Enter the Worker address first.');
+    window.open(base + '/auth/start', '_blank');
+  }
+  else if (a === 'check') {
+    saveConn();
+    const out = $('checkOut'); out.innerHTML = '<p class="muted">Checking…</p>';
+    try {
+      const r = await api('/api/status');
+      out.innerHTML = `<div class="errbox" style="background:var(--burn-soft)">${r.connected ? 'Server reachable and Google Health is connected.' : 'Server reachable, but Google Health is not connected yet. Tap “Connect Google Health”.'}${r.lastError ? `<br>Last server error: ${esc(r.lastError)}` : ''}</div>`;
+    } catch (e) { out.innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
+  }
+  else if (a === 'export') exportData();
+  else if (a === 'import') $('importFile').click();
+  else if (a === 'demo-on') { loadDemo(); render(); toast('Demo data loaded'); }
+  else if (a === 'demo-off') { removeDemo(); render(); toast('Demo data removed'); }
+  else if (a === 'force') forceRefresh();
+  if (a === 'import') $('importFile').onchange = importData;
+}
+function saveConn() {
+  S.settings.appKey = ($('appKey') ? $('appKey').value : S.settings.appKey).trim();
+  S.settings.baseUrl = ($('baseUrl') ? $('baseUrl').value : S.settings.baseUrl).trim();
+  save();
+}
+
+/* ---------- add / edit sheets ---------- */
+function openSheet(html) {
+  $('overlay').innerHTML = `<div class="scrim" id="scrim"><div class="sheet" role="dialog">${html}</div></div>`;
+  $('scrim').onclick = e => { if (e.target.id === 'scrim') closeSheet(); };
+}
+function closeSheet() { $('overlay').innerHTML = ''; }
+
+function openAdd(meal) {
+  let chosen = meal;
+  const rec = recents();
+  openSheet(`
+    <h2>Add food</h2>
+    <div class="chips" id="mealChips">${MEALS.map(m => `<button class="chip ${m === chosen ? 'on' : ''}" data-m="${m}">${m}</button>`).join('')}</div>
+    <div class="row">
+      <input class="field" id="fName" placeholder="Search or type a food" autocomplete="off" style="flex:1 1 auto">
+      <input class="field num" id="fKcal" placeholder="kcal" inputmode="numeric" style="flex:0 0 84px">
+    </div>
+    <div class="row" style="margin-top:10px"><button class="btn eat" id="fAdd" style="flex:1" disabled>Add</button><button class="btn ghost" id="fClose">Close</button></div>
+    <div class="sugg" id="sugg"></div>`);
+  const name = $('fName'), kcal = $('fKcal'), addBtn = $('fAdd');
+
+  const suggest = () => {
+    const q = name.value.trim().toLowerCase();
+    const match = list => q ? list.filter(x => q.split(/\s+/).every(t => x.name.toLowerCase().includes(t))) : list;
+    const r = match(rec).slice(0, q ? 8 : 12), st = match(STAPLES).slice(0, q ? 10 : 8);
+    const row = (x, kind) => `<button class="entry" data-kind="${kind}" data-n="${esc(x.name)}" data-k="${x.kcal}"><span class="name">${esc(x.name)}</span><span class="num muted">${x.kcal} kcal</span></button>`;
+    $('sugg').innerHTML =
+      (r.length ? `<div class="hd">Recent</div>${r.map(x => row(x, 'r')).join('')}` : '') +
+      (st.length ? `<div class="hd">Common foods</div>${st.map(x => row(x, 's')).join('')}` : '') +
+      (!r.length && !st.length ? `<p class="muted">No match. Type the calories and tap Add.</p>` : '');
+    $('sugg').querySelectorAll('.entry').forEach(b => b.onclick = () => {
+      commit(b.dataset.n, +b.dataset.k);
+    });
+  };
+  const ready = () => { addBtn.disabled = !(name.value.trim() && +kcal.value > 0); };
+  const commit = (n, k) => {
+    const r = logFood({ date: viewDate, meal: chosen, name: n, unitKcal: k });
+    closeSheet(); render();
+    toast(`${r.merged ? 'Added another' : 'Added'} · ${n}`, 'Undo', () => undoLog(r.id, r.merged));
+  };
+  name.oninput = () => { suggest(); ready(); };
+  kcal.oninput = ready;
+  addBtn.onclick = () => commit(name.value, Math.round(+kcal.value));
+  $('fClose').onclick = closeSheet;
+  $('mealChips').querySelectorAll('button').forEach(b => b.onclick = () => {
+    chosen = b.dataset.m;
+    $('mealChips').querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.m === chosen));
+  });
+  [name, kcal].forEach(el => el.onkeydown = e => { if (e.key === 'Enter' && !addBtn.disabled) addBtn.click(); });
+  suggest();
+  setTimeout(() => name.focus(), 50);
+}
+function undoLog(id, merged) {
+  const e = S.entries[id]; if (!e) return;
+  if (merged && e.qty > 1) { e.qty -= 1; e.updatedAt = Date.now(); }
+  else { e.deleted = 1; e.deletedAt = Date.now(); }
+  save(); render();
+}
+
+function openEdit(id) {
+  const e = S.entries[id]; if (!e) return;
+  let qty = e.qty, meal = e.meal;
+  openSheet(`
+    <h2>Edit entry</h2>
+    <label class="lbl2">Food</label><input class="field" id="eName" value="${esc(e.name)}">
+    <label class="lbl2">Calories for one</label><input class="field num" id="eKcal" inputmode="numeric" value="${e.unitKcal}">
+    <label class="lbl2">How many</label>
+    <div class="stepper"><button id="qMinus" aria-label="Fewer">−</button><b class="num" id="qVal" style="font-size:20px;min-width:28px;text-align:center">${qty}</b><button id="qPlus" aria-label="More">+</button>
+      <span class="muted num" id="qTotal"></span></div>
+    <label class="lbl2">Meal</label>
+    <div class="chips" id="eMeals">${MEALS.map(m => `<button class="chip ${m === meal ? 'on' : ''}" data-m="${m}">${m}</button>`).join('')}</div>
+    <div class="row" style="margin-top:6px"><button class="btn eat" id="eSave" style="flex:1">Save</button><button class="btn danger" id="eDel">Delete</button><button class="btn ghost" id="eClose">Cancel</button></div>`);
+  const total = () => { $('qVal').textContent = qty; $('qTotal').textContent = `= ${fmt((+$('eKcal').value || 0) * qty)} kcal`; };
+  total();
+  $('eKcal').oninput = total;
+  $('qMinus').onclick = () => { qty = Math.max(1, qty - 1); total(); };
+  $('qPlus').onclick = () => { qty += 1; total(); };
+  $('eMeals').querySelectorAll('button').forEach(b => b.onclick = () => {
+    meal = b.dataset.m;
+    $('eMeals').querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.m === meal));
+  });
+  $('eSave').onclick = () => {
+    const k = Math.round(+$('eKcal').value), n = $('eName').value.trim();
+    if (!n || !(k >= 0)) return toast('Enter a name and calories.');
+    Object.assign(e, { name: n, unitKcal: k, qty, meal, updatedAt: Date.now() });
+    save(); closeSheet(); render();
+  };
+  $('eDel').onclick = () => {
+    e.deleted = 1; e.deletedAt = Date.now(); save(); closeSheet(); render();
+    toast('Deleted', 'Undo', () => { delete e.deleted; delete e.deletedAt; save(); render(); });
+  };
+  $('eClose').onclick = closeSheet;
+}
+
+/* ---------- toast ---------- */
+let toastTimer;
+function toast(msg, label, fn) {
+  clearTimeout(toastTimer);
+  $('toast').innerHTML = `<div class="toast"><span>${esc(msg)}</span>${label ? `<button id="toastBtn">${esc(label)}</button>` : ''}</div>`;
+  if (label) $('toastBtn').onclick = () => { fn(); $('toast').innerHTML = ''; };
+  toastTimer = setTimeout(() => { $('toast').innerHTML = ''; }, label ? 6000 : 2500);
+}
+
+/* ---------- backup / demo / refresh ---------- */
+function exportData() {
+  const blob = new Blob([JSON.stringify({ app: 'intake', version: 1, exportedAt: Date.now(), entries: S.entries, fit: S.fit }, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = `intake-backup-${ymd(new Date())}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+function importData(ev) {
+  const file = ev.target.files[0]; if (!file) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const d = JSON.parse(r.result);
+      if (d.app !== 'intake' || typeof d.entries !== 'object') throw new Error('not a backup from this app');
+      let added = 0;
+      for (const [id, e] of Object.entries(d.entries)) {
+        const mine = S.entries[id];
+        if (mine && mine.deleted) continue;               // local tombstones always win
+        if (!mine || (e.updatedAt || 0) > (mine.updatedAt || 0)) { S.entries[id] = e; added++; }
+      }
+      for (const [date, v] of Object.entries(d.fit || {})) S.fit[date] = Object.assign({}, v, S.fit[date] || {});
+      save(); render(); toast(`Imported ${added} entries`);
+    } catch (e) { toast('Import failed: ' + e.message); }
+  };
+  r.readAsText(file);
+}
+function loadDemo() {
+  const foods = [['Oats, dry (40 g)', 156, 'Breakfast'], ['Banana (1 medium)', 105, 'Breakfast'], ['Chicken breast, cooked (1 breast)', 198, 'Lunch'],
+    ['Rice, cooked (1 cup)', 195, 'Lunch'], ['Salmon, cooked (1 fillet)', 247, 'Dinner'], ['Pasta, cooked (1 portion)', 221, 'Dinner'], ['Dark chocolate (2 squares)', 109, 'Snacks']];
+  const today = ymd(new Date());
+  for (let i = 1; i <= 14; i++) {
+    const d = addDays(today, -i), seed = (i * 37) % 11;
+    foods.forEach(([name, kcal, meal], k) => {
+      if ((k + i) % 5 === 0) return;
+      const id = `demo-${d}-${k}`;
+      S.entries[id] = { id, date: d, meal, name, unitKcal: kcal, qty: 1 + (k === 6 ? seed % 2 : 0), createdAt: i * 1000 + k, updatedAt: i * 1000 + k };
+    });
+    S.fit[d] = { steps: 6000 + seed * 650, caloriesOut: 2300 + seed * 75, sleepMinutes: 380 + seed * 9, sleepDeepMin: 60 + seed * 2, sleepRemMin: 85 + seed * 3, restingHr: 56 + (seed % 4) };
+  }
+  S.fit[today] = { steps: 4210, caloriesOut: 1480, sleepMinutes: 422, sleepDeepMin: 71, sleepRemMin: 96, restingHr: 57 };
+  save();
+}
+function removeDemo() {
+  Object.keys(S.entries).filter(k => k.startsWith('demo-')).forEach(k => delete S.entries[k]);
+  S.fit = {}; save();
+}
+async function forceRefresh() {
+  try {
+    if (navigator.serviceWorker) (await navigator.serviceWorker.getRegistrations()).forEach(r => r.unregister());
+    if (window.caches) (await caches.keys()).forEach(k => caches.delete(k));
+  } catch { /* ignore */ }
+  location.href = location.pathname + '?v=' + Date.now();
+}
+
+/* ---------- boot ---------- */
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => { /* app works without it */ });
+}
+render();
+if (S.settings.appKey) sync();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && S.settings.appKey && (!S.sync || Date.now() - S.sync.at > 10 * 60 * 1000)) sync();
+});
+</script>
+</body>
+</html>

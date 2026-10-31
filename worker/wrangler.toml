@@ -1,0 +1,13 @@
+name = "intake-vs-burn"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Exact address of the app on GitHub Pages (origin only, no path). Comma-separate to allow more than one.
+ALLOWED_ORIGIN = "https://mhoman05.github.io"
+# SCOPES = "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly ..."   # only if Google rejects the defaults
+
+# Create with:  npx wrangler kv namespace create TOKENS   then paste the id here
+[[kv_namespaces]]
+binding = "TOKENS"
+id = "PASTE_KV_NAMESPACE_ID_HERE"
