@@ -32,6 +32,7 @@ export default {
         if (url.pathname === '/api/status') return json(await status(env), 200, request, env);
         if (url.pathname === '/api/days') return json(await days(env, url), 200, request, env);
         if (url.pathname === '/api/raw') return json(await raw(env, url), 200, request, env);
+        if (url.pathname === '/api/foods') return json(await foods(url), 200, request, env);
         return json({ error: 'Not found' }, 404, request, env);
       }
       return html('<h2>Calorie tracker API</h2><p>This address only serves data to the app. Open the app from your home screen.</p>');
@@ -293,6 +294,34 @@ async function days(env, url) {
   if (errors.length) await setLastError(env, errors.map(e => `${e.type}: ${e.message}`).join(' | '));
   else await env.TOKENS.delete('lastError');
   return { days: outDays, errors, needsReconnect };
+}
+
+/* ---------------- food search (Open Food Facts) ---------------- */
+
+// Open Food Facts search does not allow direct browser calls, so the app asks the Worker.
+export function offFood(p) {
+  const n = p.nutriments || {}, num = v => (v === '' || v == null || isNaN(+v) ? null : +v), r1 = v => (v === null ? null : Math.round(v * 10) / 10);
+  let kcal = num(n['energy-kcal_100g']);
+  if (kcal === null) { const kj = num(n['energy_100g']); if (kj !== null) kcal = kj / 4.184; }
+  const name = String(p.product_name || '').trim();
+  if (kcal === null || !name) return null; // a result without calories is useless to log
+  const brand = Array.isArray(p.brands) ? p.brands[0] : String(p.brands || '').split(',')[0].trim();
+  return {
+    code: String(p.code || ''), name, brand: brand || '',
+    per100: { kcal: Math.round(kcal), p: r1(num(n.proteins_100g)), c: r1(num(n.carbohydrates_100g)), f: r1(num(n.fat_100g)) },
+    servingG: num(p.serving_quantity),
+  };
+}
+async function foods(url) {
+  const q = (url.searchParams.get('q') || '').trim();
+  if (q.length < 2 || q.length > 80) throw fail('Type at least 2 letters to search.', 400);
+  const params = new URLSearchParams({ q, page_size: '20', fields: 'code,product_name,brands,nutriments,serving_quantity' });
+  const res = await fetch(`https://search.openfoodfacts.org/search?${params}`, {
+    headers: { 'User-Agent': 'CalorieTracker/1.0 (https://github.com/Caloriesin-n-out/Calorie-tracker)' },
+  });
+  if (!res.ok) throw fail(`Food search is not answering right now (${res.status}). Try again in a minute.`);
+  const data = await res.json().catch(() => ({}));
+  return { foods: (data.hits || []).map(offFood).filter(Boolean).slice(0, 12) };
 }
 
 async function raw(env, url) {

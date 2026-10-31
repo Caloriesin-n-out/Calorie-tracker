@@ -54,8 +54,14 @@ npx wrangler deploy
 If the install option is missing, see "Install troubleshooting".
 
 ## Using it
-- **+ Add food**: type to search recent and ~40 common foods, tap to log. Not listed? Type a name and calories. Logging the same food again in the same meal raises its count instead of adding a duplicate row.
-- Tap a logged item to correct its calories, quantity or meal, or delete it. Adds and deletes have Undo.
+- **+ Add food** looks in tiers: your own saved foods, foods you added by hand, ~40 common foods, then packaged products.
+  - **Scan**: point the camera at a barcode (or type the digits). The product comes from Open Food Facts with calories, protein, carbs and fat per 100 g. Enter the grams you had and see the total live. If a product has no serving size, the app says so and asks for grams instead of guessing.
+  - **Search online** (needs the Worker): finds packaged products by name. Results go through the same grams screen.
+  - Anything logged by weight is remembered in **My foods** with the grams you used last time, so the next time is one tap. Your own corrected numbers always win over the online ones.
+  - Not listed? Type a name and calories, and optionally protein, carbs and fat.
+  - Logging the same food again in the same meal raises its count instead of adding a duplicate row. **Copy yesterday** repeats a whole meal.
+- Tap a logged item to fix its grams, per-100 g numbers, quantity or meal, or delete it. Fixing a scanned food's numbers also updates the saved food. Adds, copies and deletes have Undo.
+- Open Food Facts is crowd-sourced, so check a scanned product against its pack the first time.
 - **Trends**: eaten vs burned over 7, 14 or 30 days. Today is excluded (unfinished) and days with no food logged are skipped, not counted as 0.
 - **Settings → Export backup** saves your food log as a file. The log lives on the phone, so do this now and then, and **always before changing the app's web address** (storage belongs to the address).
 - **Settings → Load demo data** previews the charts. Remove it from the same place.
