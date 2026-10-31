@@ -273,7 +273,8 @@ async function days(env, url) {
       for (const [date, v] of Object.entries(byDay)) if (date >= from && date <= to) put(date, v);
     }],
     ['resting heart rate', async () => {
-      const filter = `daily_resting_heart_rate.date >= "${from}" AND daily_resting_heart_rate.date <= "${to}"`;
+      // Google rejects <= on this filter; use >= and an exclusive upper bound like the other types.
+      const filter = `daily_resting_heart_rate.date >= "${from}" AND daily_resting_heart_rate.date < "${addDays(to, 1)}"`;
       for (const p of await listAll(env, 'daily-resting-heart-rate', filter)) {
         const r = p.dailyRestingHeartRate; const date = dateOf(r?.date);
         const bpm = pickNumber(r?.beatsPerMinute, []);
@@ -304,6 +305,6 @@ async function raw(env, url) {
   const field = { sleep: 'sleep.interval.end_time', 'daily-resting-heart-rate': 'daily_resting_heart_rate.date' }[type];
   if (!field) throw fail('Unsupported type for raw.', 400);
   const isDate = type === 'daily-resting-heart-rate';
-  const lo = isDate ? from : `${from}T00:00:00Z`, hi = isDate ? to : `${addDays(to, 1)}T00:00:00Z`;
-  return g(env, `${type}/dataPoints?${new URLSearchParams({ filter: `${field} >= "${lo}" AND ${field} <= "${hi}"`, pageSize: '50' })}`);
+  const lo = isDate ? from : `${from}T00:00:00Z`, hi = isDate ? addDays(to, 1) : `${addDays(to, 1)}T00:00:00Z`;
+  return g(env, `${type}/dataPoints?${new URLSearchParams({ filter: `${field} >= "${lo}" AND ${field} < "${hi}"`, pageSize: '50' })}`);
 }
