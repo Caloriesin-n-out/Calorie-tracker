@@ -5,7 +5,7 @@
 // Vars (wrangler.toml):           ALLOWED_ORIGIN (the Pages address), optional SCOPES (space-separated, overrides DEFAULT_SCOPES)
 //
 // Routes
-//   GET  /auth/start      -> passphrase page, then redirect to Google consent
+//   GET  /auth/start      -> passphrase page, then redirect to Google consent (?service=calendar for Calendar, default Health)
 //   POST /auth/start      -> (form submit) validates APP_KEY, redirects to Google
 //   GET  /auth/callback   -> exchanges code, stores the refresh token in KV
 //   GET  /api/status      -> { connected, lastError }
@@ -23,8 +23,13 @@ const DEFAULT_SCOPES = [
   'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly',
   'https://www.googleapis.com/auth/googlehealth.sleep.readonly',
   'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly',
-  'https://www.googleapis.com/auth/calendar.readonly',
 ];
+// Calendar needs its own Google login: the Health API rejects any token that also carries a non-health scope
+// ("Request contains disallowed OAuth scope(s)"), so the two are connected and stored separately.
+const CALENDAR_SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
+const keys = service => (service === 'calendar'
+  ? { refresh: 'refreshToken:calendar', access: 'accessToken:calendar', scopes: 'grantedScopes:calendar', label: 'Google Calendar' }
+  : { refresh: 'refreshToken', access: 'accessToken', scopes: 'grantedScopes', label: 'Google Health' });
 
 export default {
   async fetch(request, env) {
@@ -89,7 +94,7 @@ async function keyOk(given, expected) {
   for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
   return diff === 0;
 }
-const scopes = env => (env.SCOPES || DEFAULT_SCOPES.join(' '));
+const scopes = (env, service) => (service === 'calendar' ? CALENDAR_SCOPES.join(' ') : (env.SCOPES || DEFAULT_SCOPES.join(' ')));
 const redirectUri = url => `${url.origin}/auth/callback`;
 const fail = (msg, status = 502, quiet = false) => Object.assign(new Error(msg), { status, quiet });
 
@@ -100,23 +105,25 @@ async function setLastError(env, msg) { try { await env.TOKENS.put('lastError', 
 async function authStart(request, env, url) {
   if (request.method === 'POST') {
     const form = await request.formData();
-    if (!(await keyOk(form.get('key'), env.APP_KEY))) return html('<p>Wrong app key.</p><p><a href="/auth/start">Try again</a></p>', 401);
+    const service = form.get('service') === 'calendar' ? 'calendar' : 'health';
+    if (!(await keyOk(form.get('key'), env.APP_KEY))) return html(`<p>Wrong app key.</p><p><a href="/auth/start?service=${service}">Try again</a></p>`, 401);
     const state = crypto.randomUUID();
-    await env.TOKENS.put(`state:${state}`, '1', { expirationTtl: 600 });
+    await env.TOKENS.put(`state:${state}`, service, { expirationTtl: 600 });
     const q = new URLSearchParams({
       client_id: env.GOOGLE_CLIENT_ID,
       redirect_uri: redirectUri(url),
       response_type: 'code',
-      scope: scopes(env),
+      scope: scopes(env, service),
       access_type: 'offline',
       prompt: 'consent', // always hand back a refresh token, including when reconnecting
       state,
     });
     return Response.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${q}`, 302);
   }
-  return html(`<h2>Connect Google Health</h2>
+  const service = url.searchParams.get('service') === 'calendar' ? 'calendar' : 'health';
+  return html(`<h2>Connect ${keys(service).label}</h2>
     <p>Enter your app key to continue to Google.</p>
-    <form method=post><input name=key type=password autofocus style="width:100%;padding:12px;font-size:16px;box-sizing:border-box">
+    <form method=post><input type=hidden name=service value="${service}"><input name=key type=password autofocus style="width:100%;padding:12px;font-size:16px;box-sizing:border-box">
     <p><button style="padding:12px 18px;font-size:16px">Continue</button></p></form>`);
 }
 
@@ -124,7 +131,9 @@ async function authCallback(env, url) {
   const err = url.searchParams.get('error');
   if (err) return html(`<h2>Google said no</h2><p>${esc(err)}</p>`, 400);
   const state = url.searchParams.get('state'), code = url.searchParams.get('code');
-  if (!state || !code || !(await env.TOKENS.get(`state:${state}`))) return html('<h2>Link expired</h2><p>Start again from the app.</p>', 400);
+  const stored = state && code ? await env.TOKENS.get(`state:${state}`) : null;
+  if (!stored) return html('<h2>Link expired</h2><p>Start again from the app.</p>', 400);
+  const service = stored === 'calendar' ? 'calendar' : 'health', K = keys(service);
   await env.TOKENS.delete(`state:${state}`);
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -136,23 +145,25 @@ async function authCallback(env, url) {
   });
   const tok = await res.json().catch(() => ({}));
   if (!res.ok || !tok.refresh_token) return html(`<h2>Could not connect</h2><p>${esc(tok.error_description || tok.error || 'No refresh token returned.')}</p>`, 400);
-  await env.TOKENS.put('refreshToken', tok.refresh_token);
-  await env.TOKENS.put('grantedScopes', tok.scope || '');
-  await env.TOKENS.delete('lastError');
-  await cacheAccess(env, tok);
-  return html('<h2>Connected ✓</h2><p>You can close this tab and go back to the app.</p>');
+  await env.TOKENS.put(K.refresh, tok.refresh_token);
+  await env.TOKENS.put(K.scopes, tok.scope || '');
+  await env.TOKENS.delete(K.access); // never keep a cached access token from an older connection
+  if (service === 'health') await env.TOKENS.delete('lastError');
+  await cacheAccess(env, tok, service);
+  return html(`<h2>${K.label} connected ✓</h2><p>You can close this tab and go back to the app.</p>`);
 }
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-async function cacheAccess(env, tok) {
-  if (tok.access_token) await env.TOKENS.put('accessToken', tok.access_token, { expirationTtl: Math.max(60, (tok.expires_in || 3600) - 120) });
+async function cacheAccess(env, tok, service = 'health') {
+  if (tok.access_token) await env.TOKENS.put(keys(service).access, tok.access_token, { expirationTtl: Math.max(60, (tok.expires_in || 3600) - 120) });
 }
 
-async function accessToken(env) {
-  const cached = await env.TOKENS.get('accessToken');
+async function accessToken(env, service = 'health') {
+  const K = keys(service);
+  const cached = await env.TOKENS.get(K.access);
   if (cached) return cached;
-  const refresh = await env.TOKENS.get('refreshToken');
-  if (!refresh) throw fail('Not connected to Google Health yet. Connect it from Settings.', 409);
+  const refresh = await env.TOKENS.get(K.refresh);
+  if (!refresh) throw fail(`Not connected to ${K.label} yet. Connect it from Settings.`, 409, service === 'calendar');
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -161,13 +172,13 @@ async function accessToken(env) {
   const tok = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (tok.error === 'invalid_grant') {
-      await env.TOKENS.delete('refreshToken');
-      throw fail('Google expired or revoked the connection. Please reconnect Google Health.', 401);
+      await env.TOKENS.delete(K.refresh);
+      throw fail(`Google expired or revoked the connection. Please reconnect ${K.label}.`, 401, service === 'calendar');
     }
-    throw fail(`Google token refresh failed: ${tok.error_description || tok.error || res.status}`);
+    throw fail(`Google token refresh failed: ${tok.error_description || tok.error || res.status}`, 502, service === 'calendar');
   }
-  if (tok.refresh_token) await env.TOKENS.put('refreshToken', tok.refresh_token); // rotation, if Google sends one
-  await cacheAccess(env, tok);
+  if (tok.refresh_token) await env.TOKENS.put(K.refresh, tok.refresh_token); // rotation, if Google sends one
+  await cacheAccess(env, tok, service);
   return tok.access_token;
 }
 
@@ -176,6 +187,8 @@ async function status(env) {
     connected: !!(await env.TOKENS.get('refreshToken')),
     lastError: (await env.TOKENS.get('lastError')) || null,
     scopes: (await env.TOKENS.get('grantedScopes')) || null,
+    calendarConnected: !!(await env.TOKENS.get('refreshToken:calendar')),
+    calendarScopes: (await env.TOKENS.get('grantedScopes:calendar')) || null,
     notion: !!(env.NOTION_TOKEN && env.NOTION_TASKS_DB),
   };
 }
@@ -369,14 +382,14 @@ async function days(env, url) {
 /* ---------------- Google Calendar (read only) ---------------- */
 
 async function gcal(env, path) {
-  const token = await accessToken(env);
+  const token = await accessToken(env, 'calendar');
   const res = await fetch(`https://www.googleapis.com/calendar/v3/${path}`, { headers: { Authorization: `Bearer ${token}` } });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = String(body.error?.message || res.statusText), reason = body.error?.errors?.[0]?.reason || '';
-    if (res.status === 401) { await env.TOKENS.delete('accessToken'); throw fail('Google rejected the login. Try again, or reconnect Google.', 401, true); }
+    if (res.status === 401) { await env.TOKENS.delete('accessToken:calendar'); throw fail('Google rejected the calendar login. Try again, or reconnect Google Calendar.', 401, true); }
     if (res.status === 403 && /accessNotConfigured|has not been used|is disabled/i.test(`${reason} ${msg}`)) throw fail('The Google Calendar API is not switched on in your Google Cloud project yet.', 403, true);
-    if (res.status === 403 && /insufficient|scope/i.test(`${reason} ${msg}`)) throw fail('Calendar permission is missing. Reconnect Google and approve calendar access.', 403, true);
+    if (res.status === 403 && /insufficient|scope/i.test(`${reason} ${msg}`)) throw fail('Calendar permission is missing. Tap Connect Google Calendar and approve it.', 403, true);
     throw fail(`Google Calendar ${res.status}: ${msg.slice(0, 200)}`, 502, true);
   }
   return body;
@@ -428,7 +441,7 @@ async function calendar(env, url) {
         seen.add(key); events.push(m);
       }
     } catch (e) {
-      if (/permission is missing|not switched on|rejected the login/i.test(e.message)) throw e;
+      if (/permission is missing|not switched on|rejected the calendar login|Not connected|reconnect/i.test(e.message)) throw e;
       errors.push({ calendar: c.summary || c.id, message: e.message });
     }
   }
