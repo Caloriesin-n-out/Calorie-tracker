@@ -248,6 +248,25 @@ export function sleepByDay(points) {
   return days;
 }
 
+// List filters use underscores for the type, only >= and an exclusive < upper bound.
+export const dateFilter = (field, from, to) => `${field}.date >= "${from}" AND ${field}.date < "${addDays(to, 1)}"`;
+export const civilFilter = (field, from, to) => `${field}.sample_time.civil_time >= "${from}" AND ${field}.sample_time.civil_time < "${addDays(to, 1)}"`;
+
+// Sample types (weight, body fat) can have several readings a day: keep the latest one per local date.
+export function sampleByDay(points, key, pick, outKey) {
+  const best = {};
+  for (const p of points) {
+    const s = p[key]; if (!s) continue;
+    const v = pick(s); if (v === null || isNaN(v)) continue;
+    const civil = s.sampleTime?.civilTime, date = dateOf(civil?.date);
+    if (!date) continue;
+    const t = s.sampleTime?.physicalTime || '';
+    if (!best[date] || t > best[date].t) best[date] = { t, v };
+  }
+  return Object.fromEntries(Object.entries(best).map(([d, b]) => [d, { [outKey]: Math.round(b.v * 10) / 10 }]));
+}
+function put2(put, byDay) { for (const [d, v] of Object.entries(byDay)) put(d, v); }
+
 async function days(env, url) {
   const from = url.searchParams.get('from'), to = url.searchParams.get('to');
   if (!/^\d{4}-\d\d-\d\d$/.test(from || '') || !/^\d{4}-\d\d-\d\d$/.test(to || '') || from > to) throw fail('Bad date range.', 400);
@@ -280,6 +299,39 @@ async function days(env, url) {
         const r = p.dailyRestingHeartRate; const date = dateOf(r?.date);
         const bpm = pickNumber(r?.beatsPerMinute, []);
         if (date && bpm !== null) put(date, { restingHr: bpm });
+      }
+    }],
+    ['active calories', async () => {
+      for (const p of await dailyRollUp(env, 'active-energy-burned', from, to, 14)) {
+        const v = rollValue(p, ['activeEnergyBurned', 'active_energy_burned'], ['kcalSum', 'kcal_sum', 'kcal']);
+        if (v !== null) put(dateOf(p.civilStartTime || p.civil_start_time), { activeKcal: v });
+      }
+    }],
+    ['weight', async () => put2(put, sampleByDay(await listAll(env, 'weight', civilFilter('weight', from, to)), 'weight', p => p.weightGrams != null ? Number(p.weightGrams) / 1000 : null, 'weightKg'))],
+    ['body fat', async () => put2(put, sampleByDay(await listAll(env, 'body-fat', civilFilter('body_fat', from, to)), 'bodyFat', p => p.percentage != null ? Number(p.percentage) : null, 'bodyFatPct'))],
+    ['heart rate variability', async () => {
+      for (const p of await listAll(env, 'daily-heart-rate-variability', dateFilter('daily_heart_rate_variability', from, to))) {
+        const r = p.dailyHeartRateVariability, date = dateOf(r?.date), v = pickNumber(r?.averageHeartRateVariabilityMilliseconds, []);
+        if (date && v !== null) put(date, { hrv: v });
+      }
+    }],
+    ['breathing rate', async () => {
+      for (const p of await listAll(env, 'daily-respiratory-rate', dateFilter('daily_respiratory_rate', from, to))) {
+        const r = p.dailyRespiratoryRate, date = dateOf(r?.date), v = pickNumber(r?.breathsPerMinute, []);
+        if (date && v !== null) put(date, { breathingRate: v });
+      }
+    }],
+    ['blood oxygen', async () => {
+      for (const p of await listAll(env, 'daily-oxygen-saturation', dateFilter('daily_oxygen_saturation', from, to))) {
+        const r = p.dailyOxygenSaturation, date = dateOf(r?.date), v = pickNumber(r?.averagePercentage, []);
+        if (date && v !== null) put(date, { spo2: v });
+      }
+    }],
+    ['skin temperature', async () => {
+      for (const p of await listAll(env, 'daily-sleep-temperature-derivations', dateFilter('daily_sleep_temperature_derivations', from, to))) {
+        const r = p.dailySleepTemperatureDerivations, date = dateOf(r?.date);
+        const night = pickNumber(r?.nightlyTemperatureCelsius, []), base = pickNumber(r?.baselineTemperatureCelsius, []);
+        if (date && night !== null && base !== null) put(date, { skinTempDelta: Math.round((night - base) * 100) / 100 }); // °C above or below your own normal
       }
     }],
   ];
@@ -327,13 +379,15 @@ async function foods(url) {
 async function raw(env, url) {
   const type = url.searchParams.get('type'), from = url.searchParams.get('from'), to = url.searchParams.get('to');
   if (!/^[a-z-]+$/.test(type || '') || !from || !to) throw fail('Need type, from, to.', 400);
-  const rollUps = ['steps', 'total-calories'];
+  const rollUps = ['steps', 'total-calories', 'active-energy-burned'];
   if (rollUps.includes(type)) {
     return g(env, `${type}/dataPoints:dailyRollUp`, { method: 'POST', body: JSON.stringify({ range: { start: civil(from), end: civil(addDays(to, 1)) }, windowSizeDays: 1 }) });
   }
-  const field = { sleep: 'sleep.interval.end_time', 'daily-resting-heart-rate': 'daily_resting_heart_rate.date' }[type];
-  if (!field) throw fail('Unsupported type for raw.', 400);
-  const isDate = type === 'daily-resting-heart-rate';
-  const lo = isDate ? from : `${from}T00:00:00Z`, hi = isDate ? addDays(to, 1) : `${addDays(to, 1)}T00:00:00Z`;
-  return g(env, `${type}/dataPoints?${new URLSearchParams({ filter: `${field} >= "${lo}" AND ${field} < "${hi}"`, pageSize: '50' })}`);
+  const underscore = type.replace(/-/g, '_');
+  const kind = { sleep: 'interval', weight: 'civil', 'body-fat': 'civil' }[type] || (type.startsWith('daily-') ? 'date' : null);
+  if (!kind) throw fail('Unsupported type for raw.', 400);
+  const filter = kind === 'civil' ? civilFilter(underscore, from, to)
+    : kind === 'date' ? dateFilter(underscore, from, to)
+    : `sleep.interval.end_time >= "${from}T00:00:00Z" AND sleep.interval.end_time < "${addDays(to, 1)}T00:00:00Z"`;
+  return g(env, `${type}/dataPoints?${new URLSearchParams({ filter, pageSize: '50' })}`);
 }

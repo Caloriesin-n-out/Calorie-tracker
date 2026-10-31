@@ -151,7 +151,7 @@ pre.raw { white-space: pre-wrap; word-break: break-all; font-size: 11px; max-hei
 
 <script>
 'use strict';
-const BUILD = '2026-10-31.4';
+const BUILD = '2026-10-31.5';
 const STORE_KEY = 'intake.v1';
 const MEALS = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
 const KCAL_PER_KG = 7700;
@@ -283,6 +283,25 @@ function macroText(e, times) {
 function fitDay(date) { return S.fit[date] || {}; }
 function burned(date) { const v = fitDay(date).caloriesOut; return typeof v === 'number' ? v : null; }
 
+// Body and recovery numbers from Google Health. Not every device records all of them: a tile only shows when there is data.
+const BODY = [
+  { k: 'weightKg', label: 'Weight', unit: 'kg', dp: 1, latest: true },
+  { k: 'bodyFatPct', label: 'Body fat', unit: '%', dp: 1, latest: true },
+  { k: 'hrv', label: 'HRV', unit: 'ms', dp: 0 },
+  { k: 'spo2', label: 'Blood oxygen', unit: '%', dp: 1 },
+  { k: 'breathingRate', label: 'Breathing', unit: 'per min', dp: 1 },
+  { k: 'skinTempDelta', label: 'Skin temp', unit: '°C vs normal', dp: 1, sign: true },
+];
+const numStr = (m, v) => { const t = Math.abs(v).toFixed(m.dp); return (m.sign && +t > 0 ? (v > 0 ? '+' : '−') : '') + t; };
+// Weight and body fat are not measured every day, so show the latest reading up to 30 days back, labelled with its date.
+function bodyValue(m, date) {
+  const own = fitDay(date)[m.k];
+  if (typeof own === 'number') return { v: own, date };
+  if (!m.latest) return null;
+  for (let i = 1; i <= 30; i++) { const d = addDays(date, -i), v = fitDay(d)[m.k]; if (typeof v === 'number') return { v, date: d }; }
+  return null;
+}
+
 function baseUrl() {
   const b = (S.settings.baseUrl || '').trim().replace(/\/$/, '');
   return /^https?:\/\//.test(b) ? b : null;
@@ -383,6 +402,7 @@ function todayHtml() {
         <div class="bar burn"><i style="width:${((outK || 0) / max) * 100}%"></i></div>
       </div>
       ${mt.n ? `<div class="macros num">Protein <b>${fmt(mt.p)} g</b> · Carbs <b>${fmt(mt.c)} g</b> · Fat <b>${fmt(mt.f)} g</b>${mt.n < mt.total ? `<div style="font-size:12px">from ${mt.n} of ${mt.total} items that have nutrient data</div>` : ''}</div>` : ''}
+      ${outK !== null && f.activeKcal != null ? `<div class="macros num">Active <b>${fmt(f.activeKcal)} kcal</b> · resting and other <b>${fmt(Math.max(0, outK - f.activeKcal))} kcal</b></div>` : ''}
       ${outK === null ? `<div class="netline">Burned calories appear once your Fitbit is connected in Settings.</div>` : ''}
     </div>
     <div class="stats">
@@ -391,9 +411,55 @@ function todayHtml() {
         <div class="sub">${f.sleepDeepMin != null ? `deep ${Math.round(f.sleepDeepMin)}m · REM ${Math.round(f.sleepRemMin || 0)}m` : '&nbsp;'}</div></div>
       <div class="stat"><div class="lbl">Resting HR</div><div class="val num">${f.restingHr != null ? Math.round(f.restingHr) : '—'}</div><div class="sub">${f.restingHr != null ? 'bpm' : '&nbsp;'}</div></div>
     </div>
+    ${bodyTiles(viewDate)}
     ${meals}
   </div>
   <button class="fab" data-add="${defaultMeal()}">+ Add food</button>`;
+}
+
+function bodyTiles(date) {
+  const tiles = BODY.map(m => {
+    const b = bodyValue(m, date); if (!b) return '';
+    const note = b.date === date ? m.unit : `${m.unit} · ${dayLabel(b.date)}`;
+    return `<div class="stat"><div class="lbl">${m.label}</div><div class="val num">${numStr(m, b.v)}</div><div class="sub">${esc(note)}</div></div>`;
+  }).join('');
+  return tiles ? `<div class="stats">${tiles}</div>` : '';
+}
+
+// Averages over the same completed days as the chart, plus the weight line when there are readings.
+function bodyTrendHtml(days) {
+  const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
+  const rows = [];
+  const act = days.map(d => fitDay(d).activeKcal).filter(v => typeof v === 'number');
+  if (act.length) rows.push(`<span class="k">Avg active burn (${act.length} days)</span><b>${fmt(avg(act))} kcal</b>`);
+  for (const m of BODY) {
+    const vals = days.map(d => fitDay(d)[m.k]).filter(v => typeof v === 'number');
+    if (!vals.length) continue;
+    rows.push(`<span class="k">${m.label}${m.latest ? ' latest' : ' avg'} (${vals.length} ${m.latest ? 'readings' : 'days'})</span><b>${numStr(m, m.latest ? vals[vals.length - 1] : avg(vals))} ${esc(m.unit)}</b>`);
+  }
+  const w = days.map(d => ({ d, v: fitDay(d).weightKg })).filter(p => typeof p.v === 'number');
+  let spark = '';
+  if (w.length >= 2) {
+    const lo = Math.min(...w.map(p => p.v)), hi = Math.max(...w.map(p => p.v)), span = Math.max(hi - lo, 0.4);
+    const pts = w.map((p, i) => `${(6 + (i / (w.length - 1)) * 328).toFixed(1)},${(44 - ((p.v - lo) / span) * 36).toFixed(1)}`).join(' ');
+    const change = w[w.length - 1].v - w[0].v;
+    rows.push(`<span class="k">Weight change (${w.length} readings)</span><b>${change > 0 ? '+' : change < 0 ? '−' : ''}${Math.abs(change).toFixed(1)} kg</b>`);
+    spark = `<svg viewBox="0 0 340 52" width="100%" role="img" aria-label="Weight over the period" style="margin-top:10px"><polyline points="${pts}" fill="none" stroke="var(--eat)" stroke-width="2" stroke-linejoin="round"/>${w.map((p, i) => `<circle cx="${(6 + (i / (w.length - 1)) * 328).toFixed(1)}" cy="${(44 - ((p.v - lo) / span) * 36).toFixed(1)}" r="2.5" fill="var(--eat)"/>`).join('')}</svg>`;
+  }
+  if (!rows.length) return '';
+  return `<div class="card"><h3>Body and recovery</h3><div class="kv num">${rows.join('')}</div>${spark}
+      <p class="muted" style="font-size:12px;margin:10px 0 0">Shows only what your Fitbit has sent. Compare the weight change with the “rough weight effect” above: if they keep disagreeing, your logged food or the burn estimate is off.</p></div>`;
+}
+
+// Which Google Health numbers have actually arrived, so you can see what your device records.
+function coverageHtml() {
+  const today = ymd(new Date()), days = [];
+  for (let i = 0; i < 30; i++) days.push(addDays(today, -i));
+  const all = [['steps', 'Steps'], ['caloriesOut', 'Calories burned'], ['activeKcal', 'Active calories'], ['sleepMinutes', 'Sleep'], ['restingHr', 'Resting heart rate'], ...BODY.map(m => [m.k, m.label])];
+  if (!days.some(d => Object.keys(fitDay(d)).length)) return '';
+  return `<div class="card"><h3>What your Fitbit has sent</h3>
+    <p class="muted">Days with data in the last 30. “Nothing yet” means Google has none for you, usually because the device doesn't record it or it was never synced.</p>
+    <div class="kv num">${all.map(([k, l]) => { const n = days.filter(d => typeof fitDay(d)[k] === 'number').length; return `<span class="k">${l}</span><b>${n ? n + ' days' : 'Nothing yet'}</b>`; }).join('')}</div></div>`;
 }
 
 function trendsHtml() {
@@ -444,6 +510,7 @@ function trendsHtml() {
       </div>
       <p class="muted" style="font-size:12px;margin:10px 0 0">Today is left out because it isn't finished. Days where you logged no food are skipped rather than counted as zero. The weight effect is an estimate at 7,700 kcal per kg, not a measurement.</p>
     </div>
+    ${bodyTrendHtml(days)}
   </div>`;
 }
 
@@ -475,6 +542,7 @@ function settingsHtml() {
       <div id="checkOut"></div>
       ${s ? `<div class="errbox" style="${s.ok ? 'background:var(--burn-soft)' : ''}"><b>Last sync ${new Date(s.at).toLocaleString()}:</b><br>${esc(s.message).replace(/\n/g, '<br>')}${s.needsReconnect ? '<br><b>Google needs you to connect again. Tap “Connect Google Health”.</b>' : ''}</div>` : ''}
     </div>
+    ${coverageHtml()}
     <div class="card">
       <h3>Your data</h3>
       <p class="muted">Your food log lives on this device. Export a backup now and then.</p>
@@ -906,9 +974,11 @@ function loadDemo() {
       const id = `demo-${d}-${k}`;
       S.entries[id] = { id, date: d, meal, name, unitKcal: kcal, qty: 1 + (k === 6 ? seed % 2 : 0), createdAt: i * 1000 + k, updatedAt: i * 1000 + k };
     });
-    S.fit[d] = { steps: 6000 + seed * 650, caloriesOut: 2300 + seed * 75, sleepMinutes: 380 + seed * 9, sleepDeepMin: 60 + seed * 2, sleepRemMin: 85 + seed * 3, restingHr: 56 + (seed % 4) };
+    S.fit[d] = { steps: 6000 + seed * 650, caloriesOut: 2300 + seed * 75, sleepMinutes: 380 + seed * 9, sleepDeepMin: 60 + seed * 2, sleepRemMin: 85 + seed * 3, restingHr: 56 + (seed % 4),
+      activeKcal: 520 + seed * 40, hrv: 38 + seed, spo2: 95.5 + (seed % 3) / 2, breathingRate: 14.2 + (seed % 4) / 10, skinTempDelta: ((seed % 5) - 2) / 5,
+      ...(i % 3 === 0 ? { weightKg: 81.5 - i * 0.05 + (seed % 3) / 10, bodyFatPct: 18.6 - i * 0.02 } : {}) };
   }
-  S.fit[today] = { steps: 4210, caloriesOut: 1480, sleepMinutes: 422, sleepDeepMin: 71, sleepRemMin: 96, restingHr: 57 };
+  S.fit[today] = { steps: 4210, caloriesOut: 1480, sleepMinutes: 422, sleepDeepMin: 71, sleepRemMin: 96, restingHr: 57, activeKcal: 410, hrv: 41, spo2: 96, breathingRate: 14.5, skinTempDelta: 0.2 };
   save();
 }
 function removeDemo() {

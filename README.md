@@ -63,6 +63,7 @@ If the install option is missing, see "Install troubleshooting".
 - Tap a logged item to fix its grams, per-100 g numbers, quantity or meal, or delete it. Fixing a scanned food's numbers also updates the saved food. Adds, copies and deletes have Undo.
 - Open Food Facts is crowd-sourced, so check a scanned product against its pack the first time.
 - **Trends**: eaten vs burned over 7, 14 or 30 days. Today is excluded (unfinished) and days with no food logged are skipped, not counted as 0.
+- **Body and recovery** (Today and Trends): active calories, weight, body fat, heart rate variability, blood oxygen, breathing rate and skin temperature, when your Fitbit sends them. Nothing shows for a number Google has no data for; **Settings → What your Fitbit has sent** lists which ones have arrived. Weight and body fat are shown as the latest reading, labelled with its date. No new Google permission is needed.
 - **Settings → Export backup** saves your food log as a file. The log lives on the phone, so do this now and then, and **always before changing the app's web address** (storage belongs to the address).
 - **Settings → Load demo data** previews the charts. Remove it from the same place.
 
@@ -72,7 +73,7 @@ Not yet run against a real Google Health account. Tested: the Worker's login, to
 - the exact field names for daily step and calorie totals (the parser accepts several spellings; `/api/raw` shows Google's real reply);
 - the scope URLs. The Worker assumes `https://www.googleapis.com/auth/googlehealth.<name>.readonly`. If Google rejects them, copy the exact strings from your Data Access page into `SCOPES` in `worker/wrangler.toml`.
 
-Raw reply for debugging (types: `steps`, `total-calories`, `sleep`, `daily-resting-heart-rate`):
+Raw reply for debugging (types: `steps`, `total-calories`, `active-energy-burned`, `sleep`, `weight`, `body-fat`, and any `daily-…` type such as `daily-resting-heart-rate`, `daily-heart-rate-variability`, `daily-oxygen-saturation`, `daily-respiratory-rate`, `daily-sleep-temperature-derivations`):
 ```bash
 curl -H "X-App-Key: YOUR_APP_KEY" "https://YOUR-WORKER/api/raw?type=steps&from=2026-10-29&to=2026-10-30"
 ```
