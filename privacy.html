@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calorie tracker: Privacy policy</title>
+<link rel="icon" type="image/png" href="icon-192.png">
+<style>
+  :root { --bg: #f6f5f2; --ink: #1d2124; --muted: #6b7378; --link: #d9661a; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #16181a; --ink: #eceae6; --muted: #98a0a5; --link: #f08a3c; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 28px 0 6px; }
+  p, li { margin: 8px 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+  a { color: var(--link); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Calorie tracker: Privacy policy</h1>
+  <p class="muted">Last updated 31 October 2026</p>
+
+  <p>Calorie tracker is a small personal app that lets one person log what they eat and compare it with the calories burned, steps, sleep and resting heart rate recorded by their own Fitbit Air. This page explains what happens to that information.</p>
+
+  <p><a href="./">Back to the app</a></p>
+
+  <h2>What the app reads from Google</h2>
+  <p>If you choose to connect Google Health, the app asks for read-only access to your daily step count, calories burned, sleep and resting heart rate. It cannot change or delete anything in your Google account, and it does not read anything else.</p>
+
+  <h2>Where information is kept</h2>
+  <ul>
+    <li><strong>Your food log</strong> is stored only in your phone's browser storage. It is never sent to a server.</li>
+    <li><strong>Your Google Health figures</strong> are fetched on request by a small server program (a Cloudflare Worker) that you or the app owner control, and are passed to the app on your phone. The app keeps recent daily totals on your phone so it can show them without a network connection.</li>
+    <li><strong>The Google access token</strong> that lets the server fetch your figures is stored in that same private Cloudflare account. The server is protected by a secret key, so only the app owner's phone can use it.</li>
+  </ul>
+
+  <h2>What we do not do</h2>
+  <ul>
+    <li>We do not sell, rent or share your information with anyone.</li>
+    <li>We do not show advertising, and we do not use your information for advertising.</li>
+    <li>We do not use analytics or tracking tools, and we do not build profiles of you.</li>
+    <li>No person reads your health data. The app only shows it back to you.</li>
+  </ul>
+
+  <h2>Google API Services User Data Policy</h2>
+  <p>The app's use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+
+  <h2>Your choices</h2>
+  <ul>
+    <li><strong>Stop access at any time:</strong> go to <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>, choose Calorie tracker and select Remove access. The app can then no longer read your data.</li>
+    <li><strong>Delete your food log:</strong> clear this site's data in your browser settings, or remove the installed app. Settings also has an export option if you want a copy first.</li>
+    <li><strong>Delete stored access:</strong> removing access in your Google account (above) makes the stored token useless. The app owner can also delete it from the Cloudflare account.</li>
+  </ul>
+
+  <h2>Changes and contact</h2>
+  <p>If this policy changes, the date at the top will change. For questions, open an issue in the app's repository: <a href="https://github.com/Caloriesin-n-out/Calorie-tracker">github.com/Caloriesin-n-out/Calorie-tracker</a>.</p>
+</main>
+</body>
+</html>

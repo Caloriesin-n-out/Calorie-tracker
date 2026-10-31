@@ -141,7 +141,7 @@ pre.raw { white-space: pre-wrap; word-break: break-all; font-size: 11px; max-hei
 
 <script>
 'use strict';
-const BUILD = '2026-10-31.2';
+const BUILD = '2026-10-31.3';
 const STORE_KEY = 'intake.v1';
 const MEALS = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
 const KCAL_PER_KG = 7700;
@@ -419,7 +419,7 @@ function settingsHtml() {
     </div>
     <div class="card">
       <h3>About</h3>
-      <p class="muted">Build <b>${BUILD}</b></p>
+      <p class="muted">Build <b>${BUILD}</b> · <a href="privacy.html" style="color:var(--eat)">Privacy policy</a></p>
       <button class="btn ghost" data-act="force">Force refresh app</button>
       <p class="muted" style="font-size:12px">Clears cached files and reloads. Your food log is not touched.</p>
     </div>

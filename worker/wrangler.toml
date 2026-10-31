@@ -10,4 +10,4 @@ ALLOWED_ORIGIN = "https://caloriesin-n-out.github.io"
 # Create with:  npx wrangler kv namespace create TOKENS   then paste the id here
 [[kv_namespaces]]
 binding = "TOKENS"
-id = "PASTE_KV_NAMESPACE_ID_HERE"
+id = "e8a0c8c2d28a41de916384984081917d"
