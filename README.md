@@ -1,4 +1,4 @@
-# Intake vs Burn
+# Calorie tracker
 
 A small personal app for an Android phone: log what you eat in a few taps, see it next to the calories your Fitbit Air says you burned, plus steps, sleep and resting heart rate.
 
@@ -28,7 +28,7 @@ Any change pushed to `main` is published by GitHub Pages in 1 to 2 minutes. The 
 2. **APIs & Services → Library** → "Google Health API" → **Enable**. If it isn't listed or won't enable, Google hasn't opened it to your project yet. Stop and see "Not yet verified".
 3. **OAuth consent screen**: user type **External**; add your own Google account under **Test users**.
 4. **Data Access**: add the three `googlehealth.` scopes (activity_and_fitness, sleep, health_metrics_and_measurements, all read-only).
-5. **Credentials → Create credentials → OAuth client ID → Web application**. Authorised redirect URI: `https://intake-vs-burn.<your-subdomain>.workers.dev/auth/callback` (the address from step 3). Copy the client ID and secret.
+5. **Credentials → Create credentials → OAuth client ID → Web application**. Authorised redirect URI: `https://calorie-tracker.<your-subdomain>.workers.dev/auth/callback` (the address from step 3). Copy the client ID and secret.
 
 > **7-day expiry:** while the consent screen is in *Testing*, Google ends the connection every 7 days and you tap "Connect Google Health" again. Setting the status to **In production** (you can leave it unverified; you just click through an "unverified app" warning) stops that.
 

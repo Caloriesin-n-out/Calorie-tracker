@@ -34,7 +34,7 @@ export default {
         if (url.pathname === '/api/raw') return json(await raw(env, url), 200, request, env);
         return json({ error: 'Not found' }, 404, request, env);
       }
-      return html('<h2>Intake vs Burn API</h2><p>This address only serves data to the app. Open the app from your home screen.</p>');
+      return html('<h2>Calorie tracker API</h2><p>This address only serves data to the app. Open the app from your home screen.</p>');
     } catch (e) {
       await setLastError(env, e.message);
       return json({ error: e.message }, e.status || 500, request, env);

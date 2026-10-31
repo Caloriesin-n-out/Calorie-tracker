@@ -1,7 +1,7 @@
 {
-  "id": "intakevsburn",
-  "name": "Intake vs Burn",
-  "short_name": "Intake",
+  "id": "calorietracker",
+  "name": "Calorie tracker",
+  "short_name": "Calorie tracker",
   "description": "Log food and compare calories eaten with calories burned from your Fitbit Air.",
   "start_url": "./index.html?source=pwa",
   "scope": "./",

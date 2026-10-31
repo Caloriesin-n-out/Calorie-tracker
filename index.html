@@ -8,11 +8,11 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Intake">
+<meta name="apple-mobile-web-app-title" content="Calorie tracker">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#16181a" media="(prefers-color-scheme: dark)">
-<title>Intake vs Burn</title>
+<title>Calorie tracker</title>
 <style>
 :root {
   --bg: #f6f5f2; --card: #ffffff; --ink: #1d2124; --muted: #6b7378; --line: #e5e3de;
@@ -141,7 +141,7 @@ pre.raw { white-space: pre-wrap; word-break: break-all; font-size: 11px; max-hei
 
 <script>
 'use strict';
-const BUILD = '2026-10-31.1';
+const BUILD = '2026-10-31.2';
 const STORE_KEY = 'intake.v1';
 const MEALS = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
 const KCAL_PER_KG = 7700;
@@ -395,7 +395,7 @@ function settingsHtml() {
     <div class="card">
       <h3>Google Health connection</h3>
       <label class="lbl2">Worker address (printed when you deployed the Worker)</label>
-      <input class="field" id="baseUrl" inputmode="url" autocapitalize="off" value="${esc(S.settings.baseUrl)}" placeholder="https://intake-vs-burn.yourname.workers.dev">
+      <input class="field" id="baseUrl" inputmode="url" autocapitalize="off" value="${esc(S.settings.baseUrl)}" placeholder="https://calorie-tracker.yourname.workers.dev">
       <label class="lbl2">App key (the APP_KEY you set on the Worker)</label>
       <input class="field" id="appKey" type="password" autocomplete="off" value="${esc(S.settings.appKey)}" placeholder="paste your app key">
       <div class="row" style="margin-top:12px;flex-wrap:wrap">
