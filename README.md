@@ -18,10 +18,10 @@ Any change pushed to `main` is published by GitHub Pages in 1 to 2 minutes. The 
 ## One-time setup
 
 ### 1. Publish the app on GitHub Pages
-1. Create an empty public repository on github.com named `intake-vs-burn` (no README, no licence).
+1. Create an empty public repository on github.com named `Calorie-tracker` (no README, no licence).
 2. Push this folder to it (Claude does this for you).
 3. Repo **Settings → Pages → Build and deployment**: Source **Deploy from a branch**, branch `main`, folder `/ (root)`, Save.
-4. Your app address is `https://<owner>.github.io/intake-vs-burn/`.
+4. Your app address is `https://mhoman05.github.io/Calorie-tracker/` (the repo name is case-sensitive in the address).
 
 ### 2. Google Cloud: enable the API and create credentials
 1. Go to <https://console.cloud.google.com> and create a project.
