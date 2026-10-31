@@ -4,7 +4,7 @@ compatibility_date = "2026-10-01"
 
 [vars]
 # Exact address of the app on GitHub Pages (origin only, no path). Comma-separate to allow more than one.
-ALLOWED_ORIGIN = "https://caloriesin-n-out.github.io"
+ALLOWED_ORIGIN = "https://caloriesin-n-out.github.io,https://mydayappmh.github.io"
 # Notion databases used by the My Day app (ids only, not secrets; the token is a secret: npx wrangler secret put NOTION_TOKEN)
 NOTION_TASKS_DB = "2e2e528f-adf8-8195-bced-f39c537ae294"
 NOTION_PEOPLE_DB = "1af97b4b-1373-4867-b105-b6afc71ff37f"
