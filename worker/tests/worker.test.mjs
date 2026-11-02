@@ -3,10 +3,10 @@ import worker, { htmlToText, buildEvent, parseFrom, decodeEntities } from '../wo
 import assert from 'node:assert/strict';
 
 const store = new Map([['refreshToken', 'HEALTH_RT'], ['refreshToken:calendar', 'CAL_RT']]);
-const TOKENS = { get: async k => store.get(k) ?? null, put: async (k, v) => { store.set(k, v); }, delete: async k => { store.delete(k); } };
+const TOKENS = { get: async (k, type) => { const v = store.get(k) ?? null; return type === 'json' && v ? JSON.parse(v) : v; }, put: async (k, v) => { store.set(k, v); }, delete: async k => { store.delete(k); } };
 const env = { TOKENS, ALLOWED_ORIGIN: 'https://me.github.io', APP_KEY: 'sekret', GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs',
-  NOTION_TOKEN: 'ntn_x', NOTION_TASKS_DB: '2e2e528f-adf8-8195-bced-f39c537ae294', NOTION_PEOPLE_DB: '1af97b4b-1373-4867-b105-b6afc71ff37f', NOTION_MEETINGS_DB: '6311b063-37a4-468b-b661-111f32c063b2' };
-let calls = [], calMode = 'ok', notionMode = 'ok', tokenCalls = [];
+  NOTION_TOKEN: 'ntn_x', NOTION_TASKS_DB: '2e2e528f-adf8-8195-bced-f39c537ae294', NOTION_PEOPLE_DB: '1af97b4b-1373-4867-b105-b6afc71ff37f', NOTION_MEETINGS_DB: '6311b063-37a4-468b-b661-111f32c063b2', CMC_API_KEY: 'cmc_key' };
+let calls = [], calMode = 'ok', notionMode = 'ok', tokenCalls = [], cmcMode = 'ok', cmcCalls = 0;
 const J = (b, s = 200) => new Response(JSON.stringify(b), { status: s });
 const PID = '2e2e528f-adf8-8195-bced-f39c537ae294';
 function page(id, name, status, due, done = null, extra = {}) {
@@ -63,6 +63,19 @@ globalThis.fetch = async (url, init = {}) => {
     if (url.includes('/messages/t1')) return J(msg('t1', 'thA', 'a@y.com', 'Pilot', ['INBOX'], Date.UTC(2026, 9, 30)));
     if (url.includes('/messages/t2')) return J(msg('t2', 'thA', 'ME@x.com', 'Re: Pilot', ['SENT'], Date.UTC(2026, 9, 29)));
     if (url.includes('/messages/t3')) return J(msg('t3', 'thB', 'a@y.com', 'Lunch?', ['INBOX'], Date.UTC(2026, 9, 20)));
+  }
+  // CoinMarketCap
+  if (url.startsWith('https://pro-api.coinmarketcap.com')) {
+    assert.equal(init.headers['X-CMC_PRO_API_KEY'], 'cmc_key');
+    if (cmcMode === 'badkey') return J({ status: { error_code: 1002, error_message: 'API key invalid' } }, 401);
+    if (cmcMode === 'limit') return J({ status: { error_code: 1008, error_message: 'rate limit' } }, 429);
+    if (url.includes('/v1/cryptocurrency/map')) return J({ status: { error_code: 0 }, data: [
+      { id: 1, rank: 1, name: 'Bitcoin', symbol: 'BTC', slug: 'bitcoin' }, { id: 9001, rank: null, name: 'Fake Bitcoin', symbol: 'BTC', slug: 'fake-btc', platform: { name: 'Ethereum' } },
+      { id: 32196, rank: 12, name: 'Hyperliquid', symbol: 'HYPE', slug: 'hyperliquid' }] });
+    if (url.includes('/v2/cryptocurrency/quotes/latest')) { cmcCalls++; return J({ status: { error_code: 0 }, data: {
+      1: { id: 1, name: 'Bitcoin', symbol: 'BTC', quote: { USD: { price: 77742.47, percent_change_24h: -0.12, last_updated: '2026-11-02T12:00:00Z' } } },
+      32196: [{ id: 32196, name: 'Hyperliquid', symbol: 'HYPE', quote: { USD: { price: 85.71, percent_change_24h: -2.22 } } }],
+      777: { id: 777, name: 'NoPrice', symbol: 'NOP', quote: { USD: { price: null } } } } }); }
   }
   // Notion
   if (url.includes('api.notion.com')) {
@@ -178,5 +191,22 @@ assert.deepEqual(mp.properties.Attendees.relation, [{ id: PID }], 'only valid pa
 await post('/api/meetings/new', {}); assert.equal(JSON.parse(calls.filter(c => c.url.endsWith('/v1/pages')).at(-1).init.body).properties.Name.title[0].text.content, 'Meeting');
 res = await worker.fetch(new Request('https://x.test/api/meetings/new', { method: 'POST', body: '{}', headers: { 'X-App-Key': 'sekret' } }), { ...env, NOTION_MEETINGS_DB: undefined }); assert.equal(res.status, 409);
 notionMode = 'unshared'; r = await (await req('/api/tasks?date=2026-11-01')).json(); assert.match(r.error, /share the task database/); notionMode = 'ok';
+
+// ---- CoinMarketCap
+res = await post('/api/crypto/search', { symbols: ['btc', 'HYPE', 'bad symbol!', 'btc'] }); r = await res.json();
+assert.equal(res.status, 200, JSON.stringify(r)); assert.deepEqual(Object.keys(r.results).sort(), ['BTC', 'HYPE']);
+assert.deepEqual(r.results.BTC.map(c => c.id), [1, 9001], 'best rank first, unranked last'); assert.equal(r.results.BTC[1].chain, 'Ethereum');
+const cmcUrl = calls.filter(c => c.url.includes('/v1/cryptocurrency/map')).at(-1).url; assert.match(decodeURIComponent(cmcUrl), /symbol=BTC,HYPE/);
+assert.equal((await post('/api/crypto/search', { symbols: [] })).status, 400);
+res = await post('/api/crypto/quotes', { ids: [32196, 1, 1, 'x', -5, 1.5] }); r = await res.json();
+assert.equal(r.quotes[1].price, 77742.47); assert.equal(r.quotes[1].change24h, -0.12); assert.equal(r.quotes[32196].symbol, 'HYPE'); assert.equal(r.quotes[777], undefined, 'coins without a price are dropped');
+assert.match(decodeURIComponent(calls.filter(c => c.url.includes('quotes/latest')).at(-1).url), /id=1,32196/);
+await post('/api/crypto/quotes', { ids: [1, 32196] }); assert.equal(cmcCalls, 1, 'the second ask within a minute comes from the cache');
+assert.deepEqual((await (await post('/api/crypto/quotes', { ids: [] })).json()).quotes, {});
+store.delete('cmc:q:1,32196'); cmcMode = 'badkey'; res = await post('/api/crypto/quotes', { ids: [1, 32196] }); assert.match((await res.json()).error, /rejected the API key/);
+cmcMode = 'limit'; res = await post('/api/crypto/search', { symbols: ['BTC'] }); assert.match((await res.json()).error, /rate limit/); cmcMode = 'ok';
+res = await worker.fetch(new Request('https://x.test/api/crypto/quotes', { method: 'POST', body: '{"ids":[1]}', headers: { 'X-App-Key': 'sekret' } }), { ...env, CMC_API_KEY: undefined }); assert.equal(res.status, 409);
+assert.equal((await (await req('/api/status')).json()).crypto, true);
+assert.equal(store.get('lastError') ?? null, null, 'price problems never look like a Fitbit error');
 
 console.log('worker tests passed');

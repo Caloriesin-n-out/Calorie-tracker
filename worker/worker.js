@@ -19,6 +19,9 @@
 //   GET  /api/mail/inbox  -> unread Primary mail (read only), marked when the sender is in your CRM
 //   POST /api/mail/threads -> {emails:[...]}, recent mail with those people (read only)
 //   POST /api/meetings/new -> create a meeting note in your Notion Meetings database
+//   POST /api/crypto/search -> {symbols:[...]}, CoinMarketCap coins for those tickers (best rank first)
+//   POST /api/crypto/quotes -> {ids:[...]}, latest USD price and 24h change from CoinMarketCap (cached 60 s)
+// CoinMarketCap (optional): secret CMC_API_KEY (a free key from pro.coinmarketcap.com).
 // Everything under /api needs the X-App-Key header.
 // Notion (optional): secret NOTION_TOKEN (an internal integration shared with the databases), vars NOTION_TASKS_DB, NOTION_PEOPLE_DB, NOTION_MEETINGS_DB.
 
@@ -56,10 +59,10 @@ export default {
         if (url.pathname === '/api/calendar') return json(await calendar(env, url), 200, request, env);
         if (url.pathname === '/api/tasks') return json(await tasks(env, url), 200, request, env);
         if (url.pathname === '/api/mail/inbox') return json(await mailInbox(env), 200, request, env);
-        if (['/api/mail/threads', '/api/calendar/add', '/api/meetings/new'].includes(url.pathname)) {
+        if (['/api/mail/threads', '/api/calendar/add', '/api/meetings/new', '/api/crypto/search', '/api/crypto/quotes'].includes(url.pathname)) {
           if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405, request, env);
           const body = await request.json().catch(() => ({}));
-          const fn = { '/api/mail/threads': mailThreads, '/api/calendar/add': calendarAdd, '/api/meetings/new': newMeeting }[url.pathname];
+          const fn = { '/api/mail/threads': mailThreads, '/api/calendar/add': calendarAdd, '/api/meetings/new': newMeeting, '/api/crypto/search': cryptoSearch, '/api/crypto/quotes': cryptoQuotes }[url.pathname];
           return json(await fn(env, body), 200, request, env);
         }
         if (url.pathname === '/api/brief') {
@@ -207,6 +210,7 @@ async function status(env) {
     calendarScopes: (await env.TOKENS.get('grantedScopes:calendar')) || null,
     notion: !!(env.NOTION_TOKEN && env.NOTION_TASKS_DB),
     meetingsDb: !!env.NOTION_MEETINGS_DB,
+    crypto: !!env.CMC_API_KEY,
   };
 }
 
@@ -711,6 +715,49 @@ async function newMeeting(env, b) {
   if (ids.length) properties.Attendees = { relation: ids.map(id => ({ id })) };
   const p = await notion(env, 'pages', 'POST', { parent: { database_id: env.NOTION_MEETINGS_DB }, properties });
   return { url: p.url, id: p.id };
+}
+
+/* ---------------- CoinMarketCap prices (read only) ---------------- */
+
+async function cmc(env, path) {
+  if (!env.CMC_API_KEY) throw fail('CoinMarketCap is not set up on the Worker yet (CMC_API_KEY).', 409, true);
+  const res = await fetch(`https://pro-api.coinmarketcap.com${path}`, { headers: { 'X-CMC_PRO_API_KEY': env.CMC_API_KEY, Accept: 'application/json' } });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.status?.error_code) {
+    const msg = String(body.status?.error_message || res.statusText);
+    if (res.status === 401 || res.status === 403) throw fail('CoinMarketCap rejected the API key. Check CMC_API_KEY on the Worker.', 502, true);
+    if (res.status === 429) throw fail('CoinMarketCap rate limit reached. Try again in a minute.', 502, true);
+    throw fail(`CoinMarketCap ${res.status}: ${msg.slice(0, 160)}`, 502, true);
+  }
+  return body;
+}
+export const mapCoin = c => ({ id: c.id, name: c.name, symbol: c.symbol, rank: c.rank ?? null, slug: c.slug, chain: c.platform?.name || '' });
+
+// A ticker can belong to several coins; the app shows the candidates, best-ranked first, and you pick.
+async function cryptoSearch(env, b) {
+  const symbols = [...new Set((Array.isArray(b.symbols) ? b.symbols : []).map(x => String(x).trim().toUpperCase()).filter(x => /^[A-Z0-9]{1,12}$/.test(x)))].slice(0, 30);
+  if (!symbols.length) throw fail('Give at least one ticker.', 400, true);
+  const body = await cmc(env, `/v1/cryptocurrency/map?${new URLSearchParams({ symbol: symbols.join(','), listing_status: 'active', limit: '5000' })}`);
+  const results = Object.fromEntries(symbols.map(x => [x, []]));
+  for (const c of body.data || []) if (results[c.symbol]) results[c.symbol].push(mapCoin(c));
+  for (const k of Object.keys(results)) results[k] = results[k].sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9)).slice(0, 6);
+  return { results };
+}
+
+async function cryptoQuotes(env, b) {
+  const ids = [...new Set((Array.isArray(b.ids) ? b.ids : []).map(Number).filter(n => Number.isInteger(n) && n > 0))].sort((x, y) => x - y).slice(0, 100);
+  if (!ids.length) return { at: Date.now(), quotes: {} };
+  const key = `cmc:q:${ids.join(',')}`, cached = await env.TOKENS.get(key, 'json'); // one call per minute at most, however often the app asks
+  if (cached) return cached;
+  const body = await cmc(env, `/v2/cryptocurrency/quotes/latest?${new URLSearchParams({ id: ids.join(','), convert: 'USD', skip_invalid: 'true' })}`);
+  const quotes = {};
+  for (const [id, v] of Object.entries(body.data || {})) {
+    const c = Array.isArray(v) ? v[0] : v, q = c?.quote?.USD;
+    if (c && q && q.price != null) quotes[id] = { symbol: c.symbol, name: c.name, price: q.price, change24h: q.percent_change_24h ?? null, updated: q.last_updated || null };
+  }
+  const out = { at: Date.now(), quotes };
+  await env.TOKENS.put(key, JSON.stringify(out), { expirationTtl: 60 });
+  return out;
 }
 
 /* ---------------- food search (Open Food Facts) ---------------- */
