@@ -51,7 +51,11 @@ globalThis.fetch = async (url, init = {}) => {
     if (url.includes('/profile')) return J({ emailAddress: 'me@x.com' });
     if (url.includes('/labels/INBOX')) return J({ threadsUnread: 7, messagesUnread: 9 });
     if (url.includes('/messages?')) {
-      if (dec.includes('labelIds=INBOX') ) { assert.match(dec, /labelIds=UNREAD/); return J({ messages: [{ id: 'm1' }, { id: 'm2' }] }); }
+      if (dec.includes('labelIds=INBOX')) {
+        assert.match(dec, /labelIds=UNREAD/);
+        for (const c of ['social', 'promotions', 'updates', 'forums']) assert.ok(dec.includes(`-category:${c}`), `inbox query leaves out ${c}`);
+        return J({ messages: [{ id: 'm1' }, { id: 'm2' }] });
+      }
       assert.match(dec, /q=\(from:a@y\.com OR to:a@y\.com\)/); return J({ messages: [{ id: 't1' }, { id: 't2' }, { id: 't3' }] });
     }
     if (url.includes('/messages/m1')) return J(msg('m1', 'th1', '"Dana Fox" <Dana@Acme.example>', 'Re: pilot terms &amp; dates', ['INBOX', 'UNREAD', 'STARRED'], Date.UTC(2026, 10, 2, 8, 0)));
@@ -143,7 +147,7 @@ assert.equal((await post('/api/calendar/add', { title: '' })).status, 400); asse
 
 // ---- Gmail
 res = await req('/api/mail/inbox'); r = await res.json();
-assert.equal(res.status, 200, JSON.stringify(r)); assert.equal(r.account, 'me@x.com'); assert.equal(r.unread, 7);
+assert.equal(res.status, 200, JSON.stringify(r)); assert.equal(r.account, 'me@x.com'); assert.equal(r.unread, 2, 'unread counts the Primary mail that was returned');
 assert.equal(r.messages.length, 2); assert.equal(r.messages[0].from.email, 'dana@acme.example'); assert.equal(r.messages[0].subject, 'Re: pilot terms & dates');
 assert.equal(r.messages[0].crm.name, 'Dana Fox'); assert.equal(r.messages[0].crm.tier, 'A - Key'); assert.equal(r.messages[0].starred, true); assert.equal(r.messages[1].crm, null);
 assert.equal(r.messages[0].snippet, "Hi 'there' & co");

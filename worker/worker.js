@@ -16,7 +16,7 @@
 //   POST /api/tasks/done | /api/tasks/reopen | /api/tasks/add   -> change Notion tasks
 //   POST /api/brief       -> {emails:[...]}, matches meeting attendees to People in your Notion CRM (read only)
 //   POST /api/calendar/add -> create an event on your primary calendar
-//   GET  /api/mail/inbox  -> unread inbox mail (read only), marked when the sender is in your CRM
+//   GET  /api/mail/inbox  -> unread Primary mail (read only), marked when the sender is in your CRM
 //   POST /api/mail/threads -> {emails:[...]}, recent mail with those people (read only)
 //   POST /api/meetings/new -> create a meeting note in your Notion Meetings database
 // Everything under /api needs the X-App-Key header.
@@ -669,13 +669,17 @@ async function crmMatch(env, emails) {
   } catch { return {}; }
 }
 
+// Only what Gmail files under Primary: social, promotions, updates and forums mail is left out, so LinkedIn and similar stay away.
+// Excluding categories (instead of asking for "primary") also works when the inbox tabs are switched off.
+const PRIMARY_ONLY = '-category:social -category:promotions -category:updates -category:forums';
 async function mailInbox(env) {
-  const q = new URLSearchParams([['labelIds', 'INBOX'], ['labelIds', 'UNREAD'], ['maxResults', '20']]);
-  const [list, label, profile] = await Promise.all([ggmail(env, `users/me/messages?${q}`), ggmail(env, 'users/me/labels/INBOX'), ggmail(env, 'users/me/profile')]);
+  const q = new URLSearchParams([['labelIds', 'INBOX'], ['labelIds', 'UNREAD'], ['maxResults', '20'], ['q', PRIMARY_ONLY]]);
+  const [list, profile] = await Promise.all([ggmail(env, `users/me/messages?${q}`), ggmail(env, 'users/me/profile')]);
   const messages = await Promise.all((list.messages || []).slice(0, 20).map(m => gmailMeta(env, m.id)));
   const crm = await crmMatch(env, [...new Set(messages.map(m => m.from.email))]);
   return {
-    account: profile.emailAddress || '', unread: label.threadsUnread ?? label.messagesUnread ?? messages.length,
+    account: profile.emailAddress || '',
+    unread: list.nextPageToken ? (list.resultSizeEstimate || messages.length) : messages.length,
     messages: messages.map(m => ({ ...m, crm: crm[m.from.email] || null })),
   };
 }
