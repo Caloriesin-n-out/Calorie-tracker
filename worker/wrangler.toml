@@ -8,6 +8,7 @@ ALLOWED_ORIGIN = "https://caloriesin-n-out.github.io,https://mydayappmh.github.i
 # Notion databases used by the My Day app (ids only, not secrets; the token is a secret: npx wrangler secret put NOTION_TOKEN)
 NOTION_TASKS_DB = "2e2e528f-adf8-8195-bced-f39c537ae294"
 NOTION_PEOPLE_DB = "1af97b4b-1373-4867-b105-b6afc71ff37f"
+NOTION_MEETINGS_DB = "6311b063-37a4-468b-b661-111f32c063b2"
 # SCOPES = "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly ..."   # only if Google rejects the defaults
 
 # Create with:  npx wrangler kv namespace create TOKENS   then paste the id here

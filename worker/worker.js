@@ -15,8 +15,12 @@
 //   GET  /api/tasks       -> ?date=YYYY-MM-DD, open Notion tasks plus the ones completed on that date
 //   POST /api/tasks/done | /api/tasks/reopen | /api/tasks/add   -> change Notion tasks
 //   POST /api/brief       -> {emails:[...]}, matches meeting attendees to People in your Notion CRM (read only)
+//   POST /api/calendar/add -> create an event on your primary calendar
+//   GET  /api/mail/inbox  -> unread inbox mail (read only), marked when the sender is in your CRM
+//   POST /api/mail/threads -> {emails:[...]}, recent mail with those people (read only)
+//   POST /api/meetings/new -> create a meeting note in your Notion Meetings database
 // Everything under /api needs the X-App-Key header.
-// Notion (optional): secret NOTION_TOKEN (an internal integration shared with the databases), vars NOTION_TASKS_DB and NOTION_PEOPLE_DB.
+// Notion (optional): secret NOTION_TOKEN (an internal integration shared with the databases), vars NOTION_TASKS_DB, NOTION_PEOPLE_DB, NOTION_MEETINGS_DB.
 
 const HEALTH = 'https://health.googleapis.com/v4/users/me/dataTypes';
 const DEFAULT_SCOPES = [
@@ -26,9 +30,14 @@ const DEFAULT_SCOPES = [
 ];
 // Calendar needs its own Google login: the Health API rejects any token that also carries a non-health scope
 // ("Request contains disallowed OAuth scope(s)"), so the two are connected and stored separately.
-const CALENDAR_SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
+// One login covers Calendar (read + add events) and Gmail (read only).
+const CALENDAR_SCOPES = [
+  'https://www.googleapis.com/auth/calendar.readonly',
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/gmail.readonly',
+];
 const keys = service => (service === 'calendar'
-  ? { refresh: 'refreshToken:calendar', access: 'accessToken:calendar', scopes: 'grantedScopes:calendar', label: 'Google Calendar' }
+  ? { refresh: 'refreshToken:calendar', access: 'accessToken:calendar', scopes: 'grantedScopes:calendar', label: 'Google Calendar and Gmail' }
   : { refresh: 'refreshToken', access: 'accessToken', scopes: 'grantedScopes', label: 'Google Health' });
 
 export default {
@@ -46,6 +55,13 @@ export default {
         if (url.pathname === '/api/foods') return json(await foods(url), 200, request, env);
         if (url.pathname === '/api/calendar') return json(await calendar(env, url), 200, request, env);
         if (url.pathname === '/api/tasks') return json(await tasks(env, url), 200, request, env);
+        if (url.pathname === '/api/mail/inbox') return json(await mailInbox(env), 200, request, env);
+        if (['/api/mail/threads', '/api/calendar/add', '/api/meetings/new'].includes(url.pathname)) {
+          if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405, request, env);
+          const body = await request.json().catch(() => ({}));
+          const fn = { '/api/mail/threads': mailThreads, '/api/calendar/add': calendarAdd, '/api/meetings/new': newMeeting }[url.pathname];
+          return json(await fn(env, body), 200, request, env);
+        }
         if (url.pathname === '/api/brief') {
           if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405, request, env);
           return json(await brief(env, await request.json().catch(() => ({}))), 200, request, env);
@@ -190,6 +206,7 @@ async function status(env) {
     calendarConnected: !!(await env.TOKENS.get('refreshToken:calendar')),
     calendarScopes: (await env.TOKENS.get('grantedScopes:calendar')) || null,
     notion: !!(env.NOTION_TOKEN && env.NOTION_TASKS_DB),
+    meetingsDb: !!env.NOTION_MEETINGS_DB,
   };
 }
 
@@ -381,15 +398,15 @@ async function days(env, url) {
 
 /* ---------------- Google Calendar (read only) ---------------- */
 
-async function gcal(env, path) {
+async function gcal(env, path, init = {}) {
   const token = await accessToken(env, 'calendar');
-  const res = await fetch(`https://www.googleapis.com/calendar/v3/${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await fetch(`https://www.googleapis.com/calendar/v3/${path}`, { ...init, headers: { Authorization: `Bearer ${token}`, ...(init.body ? { 'Content-Type': 'application/json' } : {}) } });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = String(body.error?.message || res.statusText), reason = body.error?.errors?.[0]?.reason || '';
-    if (res.status === 401) { await env.TOKENS.delete('accessToken:calendar'); throw fail('Google rejected the calendar login. Try again, or reconnect Google Calendar.', 401, true); }
+    if (res.status === 401) { await env.TOKENS.delete('accessToken:calendar'); throw fail('Google rejected the Calendar and Gmail login. Try again, or reconnect it.', 401, true); }
     if (res.status === 403 && /accessNotConfigured|has not been used|is disabled/i.test(`${reason} ${msg}`)) throw fail('The Google Calendar API is not switched on in your Google Cloud project yet.', 403, true);
-    if (res.status === 403 && /insufficient|scope/i.test(`${reason} ${msg}`)) throw fail('Calendar permission is missing. Tap Connect Google Calendar and approve it.', 403, true);
+    if (res.status === 403 && /insufficient|scope/i.test(`${reason} ${msg}`)) throw fail('Calendar permission is missing. Tap Connect Google (Calendar and Gmail) and approve it.', 403, true);
     throw fail(`Google Calendar ${res.status}: ${msg.slice(0, 200)}`, 502, true);
   }
   return body;
@@ -523,6 +540,7 @@ async function taskAction(env, action, b) {
     const properties = { Name: { title: [{ text: { content: title } }] } };
     if (b.due) { if (!isDate(b.due)) throw fail('Bad due date.', 400, true); properties['Due Date'] = { date: { start: b.due } }; }
     if (b.type) { if (!TASK_TYPES.includes(b.type)) throw fail('Unknown type.', 400, true); properties.Type = { multi_select: [{ name: b.type }] }; }
+    if (b.notes) properties.Notes = { rich_text: [{ text: { content: String(b.notes).slice(0, 1900) } }] };
     if (b.person) { if (!isPageId(b.person)) throw fail('Bad person id.', 400, true); properties.Person = { relation: [{ id: b.person }] }; }
     const p = await notion(env, 'pages', 'POST', { parent: { database_id: env.NOTION_TASKS_DB }, properties });
     return { task: mapTask(p) };
@@ -570,6 +588,125 @@ async function brief(env, b) {
     })),
     unmatched: emails.filter(e => !matched.has(e)),
   };
+}
+
+/* ---------------- add an event to Google Calendar ---------------- */
+
+const isEmail = e => /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/.test(e) && e.length < 120;
+
+export function buildEvent(b) {
+  const title = String(b.title || '').trim();
+  if (!title || title.length > 200) throw fail('Give the event a title (up to 200 characters).', 400, true);
+  const body = { summary: title };
+  if (b.location) body.location = String(b.location).slice(0, 200);
+  if (b.description) body.description = String(b.description).slice(0, 2000);
+  if (b.allDay) {
+    if (!/^\d{4}-\d\d-\d\d$/.test(b.start || '') || !/^\d{4}-\d\d-\d\d$/.test(b.end || '') || b.end <= b.start) throw fail('Bad dates for an all-day event.', 400, true);
+    body.start = { date: b.start }; body.end = { date: b.end };
+  } else {
+    const s = Date.parse(b.start || ''), e = Date.parse(b.end || '');
+    if (isNaN(s) || isNaN(e) || e <= s || e - s > 14 * 86400e3) throw fail('Bad start or end time.', 400, true);
+    const tz = /^[A-Za-z][A-Za-z0-9_+\-]*(\/[A-Za-z0-9_+\-]+){0,2}$/.test(b.timeZone || '') ? b.timeZone : undefined;
+    body.start = { dateTime: new Date(s).toISOString(), ...(tz ? { timeZone: tz } : {}) };
+    body.end = { dateTime: new Date(e).toISOString(), ...(tz ? { timeZone: tz } : {}) };
+  }
+  const guests = [...new Set((Array.isArray(b.guests) ? b.guests : []).map(g => String(g).trim().toLowerCase()).filter(Boolean))];
+  if (guests.length > 20 || guests.some(g => !isEmail(g))) throw fail('Check the guest email addresses (up to 20).', 400, true);
+  if (guests.length) body.attendees = guests.map(email => ({ email }));
+  if (b.meet) body.conferenceData = { createRequest: { requestId: crypto.randomUUID(), conferenceSolutionKey: { type: 'hangoutsMeet' } } };
+  // Invitations go out only when you added guests; an event for yourself never emails anyone.
+  return { body, query: `conferenceDataVersion=1&sendUpdates=${guests.length ? 'all' : 'none'}` };
+}
+
+async function calendarAdd(env, b) {
+  const { body, query } = buildEvent(b);
+  const ev = await gcal(env, `calendars/primary/events?${query}`, { method: 'POST', body: JSON.stringify(body) });
+  return { event: mapEvent(ev, 'Calendar') || { id: ev.id, title: body.summary } };
+}
+
+/* ---------------- Gmail (read only) ---------------- */
+
+async function ggmail(env, path) {
+  const token = await accessToken(env, 'calendar');
+  const res = await fetch(`https://gmail.googleapis.com/gmail/v1/${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = String(body.error?.message || res.statusText);
+    if (res.status === 401) { await env.TOKENS.delete('accessToken:calendar'); throw fail('Google rejected the Calendar and Gmail login. Try again, or reconnect it.', 401, true); }
+    if (res.status === 403 && /has not been used|is disabled|accessNotConfigured/i.test(msg)) throw fail('The Gmail API is not switched on in your Google Cloud project yet.', 403, true);
+    if (res.status === 403 && /insufficient|scope/i.test(msg)) throw fail('Gmail permission is missing. Tap Connect Google (Calendar and Gmail) and approve it.', 403, true);
+    throw fail(`Gmail ${res.status}: ${msg.slice(0, 200)}`, 502, true);
+  }
+  return body;
+}
+
+export function decodeEntities(s) {
+  return String(s || '').replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#(\d+);/g, (m, n) => String.fromCharCode(+n)).replace(/&amp;/g, '&');
+}
+export function parseFrom(h) {
+  const raw = String(h || '').trim(), m = /^"?([^"<]*?)"?\s*<([^>]+)>$/.exec(raw);
+  if (m) return { name: m[1].trim() || m[2].trim(), email: m[2].trim().toLowerCase() };
+  return { name: raw, email: raw.toLowerCase() };
+}
+export function mapMail(m) {
+  const hdr = n => (m.payload?.headers || []).find(h => h.name.toLowerCase() === n)?.value || '';
+  const from = parseFrom(hdr('from'));
+  return {
+    id: m.id, threadId: m.threadId, from, to: hdr('to').toLowerCase(), subject: decodeEntities(hdr('subject')) || '(no subject)', snippet: decodeEntities(m.snippet).slice(0, 220),
+    at: Number(m.internalDate) || 0, starred: (m.labelIds || []).includes('STARRED'), unread: (m.labelIds || []).includes('UNREAD'),
+  };
+}
+const gmailMeta = (env, id) => ggmail(env, `users/me/messages/${encodeURIComponent(id)}?${new URLSearchParams([['format', 'metadata'], ['metadataHeaders', 'From'], ['metadataHeaders', 'To'], ['metadataHeaders', 'Subject'], ['fields', 'id,threadId,labelIds,snippet,internalDate,payload/headers']])}`).then(mapMail);
+
+// Which of these addresses are people in the Notion CRM? Quietly returns nothing when Notion is not set up.
+async function crmMatch(env, emails) {
+  if (!env.NOTION_TOKEN || !env.NOTION_PEOPLE_DB || !emails.length) return {};
+  try {
+    const found = await notion(env, `databases/${env.NOTION_PEOPLE_DB}/query`, 'POST', { filter: { or: emails.slice(0, 40).map(e => ({ property: 'Email', email: { contains: e } })) }, page_size: 50 });
+    const out = {};
+    for (const p of (found.results || []).map(mapPerson)) if (p.email && emails.includes(p.email)) out[p.email] = { id: p.id, name: p.name, tier: p.tier };
+    return out;
+  } catch { return {}; }
+}
+
+async function mailInbox(env) {
+  const q = new URLSearchParams([['labelIds', 'INBOX'], ['labelIds', 'UNREAD'], ['maxResults', '20']]);
+  const [list, label, profile] = await Promise.all([ggmail(env, `users/me/messages?${q}`), ggmail(env, 'users/me/labels/INBOX'), ggmail(env, 'users/me/profile')]);
+  const messages = await Promise.all((list.messages || []).slice(0, 20).map(m => gmailMeta(env, m.id)));
+  const crm = await crmMatch(env, [...new Set(messages.map(m => m.from.email))]);
+  return {
+    account: profile.emailAddress || '', unread: label.threadsUnread ?? label.messagesUnread ?? messages.length,
+    messages: messages.map(m => ({ ...m, crm: crm[m.from.email] || null })),
+  };
+}
+
+async function mailThreads(env, b) {
+  const emails = [...new Set((Array.isArray(b.emails) ? b.emails : []).map(e => String(e).trim().toLowerCase()).filter(isEmail))].slice(0, 8);
+  if (!emails.length) return { account: '', messages: [] };
+  const q = `(${emails.map(e => `from:${e} OR to:${e}`).join(' OR ')})`;
+  const [list, profile] = await Promise.all([ggmail(env, `users/me/messages?${new URLSearchParams({ q, maxResults: '10' })}`), ggmail(env, 'users/me/profile')]);
+  const all = await Promise.all((list.messages || []).slice(0, 10).map(m => gmailMeta(env, m.id)));
+  const seen = new Set(), account = (profile.emailAddress || '').toLowerCase();
+  const messages = all.filter(m => !seen.has(m.threadId) && seen.add(m.threadId)).slice(0, 5).map(m => ({ ...m, mine: !!account && m.from.email === account }));
+  return { account: profile.emailAddress || '', messages };
+}
+
+/* ---------------- Notion: start a meeting note ---------------- */
+
+async function newMeeting(env, b) {
+  if (!env.NOTION_MEETINGS_DB) throw fail('The Meetings database is not set up on the Worker yet (NOTION_MEETINGS_DB).', 409, true);
+  const title = String(b.title || 'Meeting').trim().slice(0, 200) || 'Meeting';
+  const properties = { Name: { title: [{ text: { content: title } }] } };
+  const sOk = b.start && !isNaN(Date.parse(b.start));
+  if (sOk) {
+    const date = { start: b.start };
+    if (b.end && !isNaN(Date.parse(b.end)) && Date.parse(b.end) > Date.parse(b.start) && String(b.start).includes('T')) date.end = b.end;
+    properties.Date = { date };
+  }
+  const ids = [...new Set((Array.isArray(b.attendees) ? b.attendees : []).filter(isPageId))].slice(0, 20);
+  if (ids.length) properties.Attendees = { relation: ids.map(id => ({ id })) };
+  const p = await notion(env, 'pages', 'POST', { parent: { database_id: env.NOTION_MEETINGS_DB }, properties });
+  return { url: p.url, id: p.id };
 }
 
 /* ---------------- food search (Open Food Facts) ---------------- */
