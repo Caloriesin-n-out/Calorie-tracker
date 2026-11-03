@@ -1,11 +1,11 @@
 // Run with: npm test (from the worker folder). Google, Gmail and Notion are simulated; nothing leaves the machine.
-import worker, { htmlToText, buildEvent, parseFrom, decodeEntities, cleanBody, bodyOf, b64url } from '../worker.js';
+import worker, { htmlToText, buildEvent, parseFrom, decodeEntities, cleanBody, bodyOf, b64url, mapRestaurant, restaurantProps } from '../worker.js';
 import assert from 'node:assert/strict';
 
 const store = new Map([['refreshToken', 'HEALTH_RT'], ['refreshToken:calendar', 'CAL_RT']]);
 const TOKENS = { get: async (k, type) => { const v = store.get(k) ?? null; return type === 'json' && v ? JSON.parse(v) : v; }, put: async (k, v) => { store.set(k, v); }, delete: async k => { store.delete(k); } };
 const env = { TOKENS, ALLOWED_ORIGIN: 'https://me.github.io', APP_KEY: 'sekret', GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs',
-  NOTION_TOKEN: 'ntn_x', NOTION_TASKS_DB: '2e2e528f-adf8-8195-bced-f39c537ae294', NOTION_PEOPLE_DB: '1af97b4b-1373-4867-b105-b6afc71ff37f', NOTION_MEETINGS_DB: '6311b063-37a4-468b-b661-111f32c063b2', CMC_API_KEY: 'cmc_key' };
+  NOTION_TOKEN: 'ntn_x', NOTION_TASKS_DB: '2e2e528f-adf8-8195-bced-f39c537ae294', NOTION_PEOPLE_DB: '1af97b4b-1373-4867-b105-b6afc71ff37f', NOTION_MEETINGS_DB: '6311b063-37a4-468b-b661-111f32c063b2', NOTION_RESTAURANTS_DB: 'f5ce7d95-2e83-46f0-a0f4-3e7e441f632f', CMC_API_KEY: 'cmc_key' };
 let calls = [], calMode = 'ok', notionMode = 'ok', tokenCalls = [], cmcMode = 'ok', cmcCalls = 0;
 const J = (b, s = 200) => new Response(JSON.stringify(b), { status: s });
 const PID = '2e2e528f-adf8-8195-bced-f39c537ae294';
@@ -15,6 +15,11 @@ function page(id, name, status, due, done = null, extra = {}) {
 }
 const person = (id, name, email) => ({ id, url: 'https://notion.so/' + id, properties: { Name: { title: [{ plain_text: name }] }, Email: { email }, Role: { rich_text: [{ plain_text: 'CFO' }] }, Company: { relation: [{ id: 'co1' }] }, Tier: { select: { name: 'A - Key' } },
   'History summary': { rich_text: [{ plain_text: 'Wants a pilot.' }] }, 'Last Contacted': { formula: { type: 'date', date: { start: '2026-10-01' } } }, 'Follow-up Status': { formula: { type: 'string', string: 'Overdue' } }, 'Latest Interaction': { rollup: { type: 'date', date: null } } } });
+const RID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+const restaurant = (id, name, over = {}) => ({ id, url: 'https://notion.so/' + id, properties: { Name: { title: [{ plain_text: name }] }, City: { select: { name: 'Costa Brava' } }, Area: { rich_text: [{ plain_text: 'Llafranc' }] },
+  Cuisine: { select: { name: 'Japanese' } }, Meal: { multi_select: [{ name: 'Lunch' }] }, Price: { select: null }, Favourite: { checkbox: true }, 'Booking method': { select: { name: 'CoverManager' } },
+  'Booking link': { url: 'https://book.example/far' }, 'Platform id': { rich_text: [] }, Website: { url: null }, Phone: { phone_number: '+34 972 000 000' }, WhatsApp: { phone_number: null },
+  'Card needed': { select: { name: 'Unknown' } }, 'Deposit / policy': { rich_text: [] }, Notes: { rich_text: [] }, 'Last visit': { date: null }, Visits: { number: null }, ...over } });
 const msg = (id, thread, from, subject, labels, ms) => ({ id, threadId: thread, labelIds: labels, snippet: 'Hi &#39;there&#39; &amp; co', internalDate: String(ms), payload: { headers: [{ name: 'From', value: from }, { name: 'To', value: 'me@x.com' }, { name: 'Subject', value: subject }] } });
 
 globalThis.fetch = async (url, init = {}) => {
@@ -95,6 +100,11 @@ globalThis.fetch = async (url, init = {}) => {
       return J({ results: [person('per1', 'Dana Fox', 'DANA@acme.example'), person('per2', 'Alexandra', 'a@y.com.au'), person('per3', 'Alex Young', 'a@y.com')].filter(p => em.some(e => p.properties.Email.email.toLowerCase().includes(e))) });
     }
     if (url.endsWith('/pages/co1')) return J({ id: 'co1', properties: { Name: { type: 'title', title: [{ plain_text: 'Acme Corp' }] } } });
+    if (url.endsWith('/databases/f5ce7d95-2e83-46f0-a0f4-3e7e441f632f/query')) {
+      return body.start_cursor ? J({ results: [restaurant('r2', 'Filandón', { City: { select: { name: 'Madrid' } }, Favourite: { checkbox: false } })], has_more: false })
+        : J({ results: [restaurant('r1', 'Far Nomo')], has_more: true, next_cursor: 'c2' });
+    }
+    if (url.includes('/pages/' + RID) && init.method === 'PATCH') return J(restaurant(RID, 'Far Nomo', { 'Card needed': body.properties['Card needed'] || { select: { name: 'Unknown' } }, Visits: body.properties.Visits || { number: null } }));
     if (url.endsWith('/databases/2e2e528f-adf8-8195-bced-f39c537ae294/query')) {
       if (body.filter.property === 'Completion Date') return J({ results: [page('p3', 'Sent invoice', 'Done', '2026-10-30', '2026-11-01')] });
       if (body.filter.and[0].or) return J({ results: [page('t9', 'Send pilot terms', 'Not started', '2026-11-03', null, { 'Waiting on': { checkbox: true }, Person: { relation: [{ id: 'per3' }] } })] });
@@ -102,6 +112,7 @@ globalThis.fetch = async (url, init = {}) => {
     }
     if (url.includes('/pages/') && init.method === 'PATCH') return J(page(url.split('/pages/')[1], 'Pay rent', body.properties.Status.status.name, '2026-10-30', body.properties['Completion Date'].date?.start || null));
     if (url.endsWith('/v1/pages') && init.method === 'POST') {
+      if (body.parent.database_id === env.NOTION_RESTAURANTS_DB) return J(restaurant('rnew', body.properties.Name.title[0].text.content, { City: body.properties.City }));
       if (body.parent.database_id === env.NOTION_MEETINGS_DB) return J({ id: 'meet1', url: 'https://notion.so/meet1', properties: body.properties });
       return J(page('new1', body.properties.Name.title[0].text.content, 'Not started', body.properties['Due Date']?.date.start || null));
     }
@@ -234,5 +245,30 @@ cmcMode = 'limit'; res = await post('/api/crypto/search', { symbols: ['BTC'] });
 res = await worker.fetch(new Request('https://x.test/api/crypto/quotes', { method: 'POST', body: '{"ids":[1]}', headers: { 'X-App-Key': 'sekret' } }), { ...env, CMC_API_KEY: undefined }); assert.equal(res.status, 409);
 assert.equal((await (await req('/api/status')).json()).crypto, true);
 assert.equal(store.get('lastError') ?? null, null, 'price problems never look like a Fitbit error');
+
+// ---- Restaurants (Mesa)
+res = await post('/api/restaurants/list', {}); r = await res.json();
+assert.equal(res.status, 200, JSON.stringify(r)); assert.deepEqual(r.restaurants.map(x => x.name), ['Far Nomo', 'Filandón'], 'follows the pagination cursor');
+assert.deepEqual(r.restaurants[0], { id: 'r1', url: 'https://notion.so/r1', name: 'Far Nomo', city: 'Costa Brava', area: 'Llafranc', cuisine: 'Japanese', meals: ['Lunch'], price: '', favourite: true, method: 'CoverManager',
+  bookingLink: 'https://book.example/far', platformId: '', website: '', phone: '+34 972 000 000', whatsapp: '', card: 'Unknown', policy: '', notes: '', lastVisit: null, visits: 0 });
+assert.equal((await req('/api/restaurants/list')).status, 405, 'POST only');
+res = await post('/api/restaurants/update', { id: RID, fields: { card: 'Yes - deposit', visits: 2, lastVisit: '2026-11-07', policy: 'EUR 20 per person' } }); r = await res.json();
+assert.equal(res.status, 200, JSON.stringify(r)); assert.equal(r.restaurant.card, 'Yes - deposit'); assert.equal(r.restaurant.visits, 2);
+const rp = JSON.parse(calls.filter(c => c.url.includes('/pages/' + RID)).at(-1).init.body).properties;
+assert.deepEqual(rp['Card needed'], { select: { name: 'Yes - deposit' } }); assert.deepEqual(rp['Last visit'], { date: { start: '2026-11-07' } }); assert.equal(rp['Deposit / policy'].rich_text[0].text.content, 'EUR 20 per person');
+for (const bad of [{ card: 'Maybe' }, { method: 'Fax' }, { bookingLink: 'javascript:alert(1)' }, { phone: 'call me' }, { visits: -1 }, { visits: 1.5 }, { lastVisit: 'tomorrow' }, { city: 'Paris' }, { meals: ['Snack'] }, { name: '' }]) {
+  assert.equal((await post('/api/restaurants/update', { id: RID, fields: bad })).status, 400, JSON.stringify(bad));
+}
+assert.equal((await post('/api/restaurants/update', { id: 'nope', fields: { card: 'No' } })).status, 400);
+assert.equal((await post('/api/restaurants/update', { id: RID, fields: { secret: 'x' } })).status, 400, 'unknown fields are ignored, leaving nothing to change');
+res = await post('/api/restaurants/add', { name: '  Nuevo  ', city: 'Madrid', cuisine: 'Tapas, bar' }); r = await res.json();
+assert.equal(res.status, 200, JSON.stringify(r)); assert.equal(r.restaurant.name, 'Nuevo');
+const ap = JSON.parse(calls.filter(c => c.url.endsWith('/v1/pages')).at(-1).init.body);
+assert.equal(ap.parent.database_id, env.NOTION_RESTAURANTS_DB); assert.deepEqual(ap.properties['Card needed'], { select: { name: 'Unknown' } }); assert.equal(ap.properties.Cuisine.select.name, 'Tapas  bar', 'commas are not allowed in a select option');
+assert.equal((await post('/api/restaurants/add', { name: 'No city' })).status, 400);
+res = await worker.fetch(new Request('https://x.test/api/restaurants/list', { method: 'POST', body: '{}', headers: { 'X-App-Key': 'sekret' } }), { ...env, NOTION_RESTAURANTS_DB: undefined }); assert.equal(res.status, 409);
+notionMode = 'unshared'; r = await (await post('/api/restaurants/list', {})).json(); assert.match(r.error, /Connections/); notionMode = 'ok';
+assert.equal((await (await req('/api/status')).json()).restaurantsDb, true);
+assert.deepEqual(Object.keys(restaurantProps({ name: 'X', city: 'Vienna' }, true)), ['Name', 'City']);
 
 console.log('worker tests passed');

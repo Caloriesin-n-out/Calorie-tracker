@@ -24,7 +24,7 @@
 //   POST /api/crypto/quotes -> {ids:[...]}, latest USD price and 24h change from CoinMarketCap (cached 60 s)
 // CoinMarketCap (optional): secret CMC_API_KEY (a free key from pro.coinmarketcap.com).
 // Everything under /api needs the X-App-Key header.
-// Notion (optional): secret NOTION_TOKEN (an internal integration shared with the databases), vars NOTION_TASKS_DB, NOTION_PEOPLE_DB, NOTION_MEETINGS_DB.
+// Notion (optional): secret NOTION_TOKEN (an internal integration shared with the databases), vars NOTION_TASKS_DB, NOTION_PEOPLE_DB, NOTION_MEETINGS_DB, NOTION_RESTAURANTS_DB.
 
 const HEALTH = 'https://health.googleapis.com/v4/users/me/dataTypes';
 const DEFAULT_SCOPES = [
@@ -60,10 +60,11 @@ export default {
         if (url.pathname === '/api/calendar') return json(await calendar(env, url), 200, request, env);
         if (url.pathname === '/api/tasks') return json(await tasks(env, url), 200, request, env);
         if (url.pathname === '/api/mail/inbox') return json(await mailInbox(env), 200, request, env);
-        if (['/api/mail/threads', '/api/mail/message', '/api/calendar/add', '/api/meetings/new', '/api/crypto/search', '/api/crypto/quotes'].includes(url.pathname)) {
+        if (['/api/mail/threads', '/api/mail/message', '/api/calendar/add', '/api/meetings/new', '/api/crypto/search', '/api/crypto/quotes', '/api/restaurants/list', '/api/restaurants/update', '/api/restaurants/add'].includes(url.pathname)) {
           if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405, request, env);
           const body = await request.json().catch(() => ({}));
-          const fn = { '/api/mail/threads': mailThreads, '/api/mail/message': mailMessage, '/api/calendar/add': calendarAdd, '/api/meetings/new': newMeeting, '/api/crypto/search': cryptoSearch, '/api/crypto/quotes': cryptoQuotes }[url.pathname];
+          const fn = { '/api/mail/threads': mailThreads, '/api/mail/message': mailMessage, '/api/calendar/add': calendarAdd, '/api/meetings/new': newMeeting, '/api/crypto/search': cryptoSearch, '/api/crypto/quotes': cryptoQuotes,
+            '/api/restaurants/list': restaurantList, '/api/restaurants/update': restaurantUpdate, '/api/restaurants/add': restaurantAdd }[url.pathname];
           return json(await fn(env, body), 200, request, env);
         }
         if (url.pathname === '/api/brief') {
@@ -211,6 +212,7 @@ async function status(env) {
     calendarScopes: (await env.TOKENS.get('grantedScopes:calendar')) || null,
     notion: !!(env.NOTION_TOKEN && env.NOTION_TASKS_DB),
     meetingsDb: !!env.NOTION_MEETINGS_DB,
+    restaurantsDb: !!env.NOTION_RESTAURANTS_DB,
     crypto: !!env.CMC_API_KEY,
   };
 }
@@ -755,6 +757,90 @@ async function newMeeting(env, b) {
   if (ids.length) properties.Attendees = { relation: ids.map(id => ({ id })) };
   const p = await notion(env, 'pages', 'POST', { parent: { database_id: env.NOTION_MEETINGS_DB }, properties });
   return { url: p.url, id: p.id };
+}
+
+/* ---------------- Notion: restaurant favourites (Mesa app) ---------------- */
+
+const R_CITIES = ['Madrid', 'Costa Brava', 'Vienna'];
+const R_METHODS = ['CoverManager', 'Molzait', 'TheFork', 'Own website', 'Phone', 'WhatsApp', 'Email', 'Walk-in', 'Unknown'];
+const R_CARDS = ['Unknown', 'No', 'Yes - guarantee', 'Yes - deposit'];
+const R_PRICES = ['€', '€€', '€€€', '€€€€'];
+const R_MEALS = ['Lunch', 'Dinner', 'Brunch'];
+
+export function mapRestaurant(p) {
+  const pr = p.properties || {}, text = a => (a || []).map(t => t.plain_text).join('').trim();
+  return {
+    id: p.id, url: p.url, name: text(pr.Name?.title) || '(untitled)', city: pr.City?.select?.name || '', area: text(pr.Area?.rich_text),
+    cuisine: pr.Cuisine?.select?.name || '', meals: (pr.Meal?.multi_select || []).map(o => o.name), price: pr.Price?.select?.name || '',
+    favourite: !!pr.Favourite?.checkbox, method: pr['Booking method']?.select?.name || 'Unknown', bookingLink: pr['Booking link']?.url || '',
+    platformId: text(pr['Platform id']?.rich_text), website: pr.Website?.url || '', phone: pr.Phone?.phone_number || '', whatsapp: pr.WhatsApp?.phone_number || '',
+    card: pr['Card needed']?.select?.name || 'Unknown', policy: text(pr['Deposit / policy']?.rich_text), notes: text(pr.Notes?.rich_text),
+    lastVisit: pr['Last visit']?.date?.start || null, visits: pr.Visits?.number ?? 0,
+  };
+}
+
+const rtext = (s, max = 1900) => ({ rich_text: s ? [{ text: { content: String(s).slice(0, max) } }] : [] });
+const isHttp = s => /^https?:\/\/[^\s]{3,500}$/i.test(s || '');
+const isPhone = s => /^\+?[0-9 ()./-]{5,25}$/.test(s || '');
+
+// Only these fields can be written, each checked, so a bad request cannot touch anything else in the database.
+export function restaurantProps(b, creating = false) {
+  const out = {}, bad = m => { throw fail(m, 400, true); };
+  const has = k => Object.prototype.hasOwnProperty.call(b, k);
+  if (has('name')) { const n = String(b.name || '').trim(); if (!n || n.length > 120) bad('Give the restaurant a name (up to 120 characters).'); out.Name = { title: [{ text: { content: n } }] }; }
+  else if (creating) bad('Give the restaurant a name.');
+  if (has('city')) { if (b.city && !R_CITIES.includes(b.city)) bad('Unknown city.'); out.City = { select: b.city ? { name: b.city } : null }; }
+  else if (creating) bad('Pick a city.');
+  if (has('area')) out.Area = rtext(b.area, 100);
+  if (has('cuisine')) { const c = String(b.cuisine || '').trim().replace(/,/g, ' '); if (c.length > 40) bad('Cuisine is too long.'); out.Cuisine = { select: c ? { name: c } : null }; }
+  if (has('meals')) { const m = Array.isArray(b.meals) ? b.meals : []; if (m.some(x => !R_MEALS.includes(x))) bad('Unknown meal.'); out.Meal = { multi_select: m.map(name => ({ name })) }; }
+  if (has('price')) { if (b.price && !R_PRICES.includes(b.price)) bad('Unknown price level.'); out.Price = { select: b.price ? { name: b.price } : null }; }
+  if (has('favourite')) out.Favourite = { checkbox: !!b.favourite };
+  if (has('method')) { if (!R_METHODS.includes(b.method)) bad('Unknown booking method.'); out['Booking method'] = { select: { name: b.method } }; }
+  for (const [k, prop] of [['bookingLink', 'Booking link'], ['website', 'Website']]) if (has(k)) { if (b[k] && !isHttp(b[k])) bad(`${prop} must start with http:// or https://.`); out[prop] = { url: b[k] || null }; }
+  for (const [k, prop] of [['phone', 'Phone'], ['whatsapp', 'WhatsApp']]) if (has(k)) { if (b[k] && !isPhone(b[k])) bad(`${prop} number looks wrong.`); out[prop] = { phone_number: b[k] || null }; }
+  if (has('platformId')) out['Platform id'] = rtext(b.platformId, 100);
+  if (has('card')) { if (!R_CARDS.includes(b.card)) bad('Unknown card setting.'); out['Card needed'] = { select: { name: b.card } }; }
+  if (has('policy')) out['Deposit / policy'] = rtext(b.policy);
+  if (has('notes')) out.Notes = rtext(b.notes);
+  if (has('lastVisit')) { if (b.lastVisit && !isDate(b.lastVisit)) bad('Bad date.'); out['Last visit'] = { date: b.lastVisit ? { start: b.lastVisit } : null }; }
+  if (has('visits')) { const n = Number(b.visits); if (!Number.isInteger(n) || n < 0 || n > 999) bad('Visits must be a whole number.'); out.Visits = { number: n }; }
+  return out;
+}
+
+function restaurantDb(env) {
+  if (!env.NOTION_RESTAURANTS_DB) throw fail('The restaurant list is not set up on the Worker yet (NOTION_RESTAURANTS_DB).', 409, true);
+  return env.NOTION_RESTAURANTS_DB;
+}
+const restaurantHint = e => { if (/Notion 404/.test(e.message)) e.message += ' Open the Restaurant Favourites database in Notion, then ••• > Connections, and add your integration.'; return e; };
+
+async function restaurantList(env) {
+  const db = restaurantDb(env), out = [];
+  let cursor;
+  try {
+    do {
+      const r = await notion(env, `databases/${db}/query`, 'POST', { page_size: 100, ...(cursor ? { start_cursor: cursor } : {}) });
+      out.push(...(r.results || []).map(mapRestaurant));
+      cursor = r.has_more ? r.next_cursor : null;
+    } while (cursor && out.length < 500);
+  } catch (e) { throw restaurantHint(e); }
+  return { restaurants: out };
+}
+
+async function restaurantUpdate(env, b) {
+  restaurantDb(env);
+  if (!isPageId(b.id)) throw fail('Need a restaurant id.', 400, true);
+  const properties = restaurantProps(b.fields && typeof b.fields === 'object' ? b.fields : {});
+  if (!Object.keys(properties).length) throw fail('Nothing to change.', 400, true);
+  try { return { restaurant: mapRestaurant(await notion(env, `pages/${b.id}`, 'PATCH', { properties })) }; } catch (e) { throw restaurantHint(e); }
+}
+
+async function restaurantAdd(env, b) {
+  const db = restaurantDb(env);
+  const properties = restaurantProps(b, true);
+  properties['Booking method'] = properties['Booking method'] || { select: { name: 'Unknown' } };
+  properties['Card needed'] = properties['Card needed'] || { select: { name: 'Unknown' } };
+  try { return { restaurant: mapRestaurant(await notion(env, 'pages', 'POST', { parent: { database_id: db }, properties })) }; } catch (e) { throw restaurantHint(e); }
 }
 
 /* ---------------- CoinMarketCap prices (read only) ---------------- */
