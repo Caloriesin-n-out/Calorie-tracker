@@ -18,6 +18,7 @@
 //   POST /api/calendar/add -> create an event on your primary calendar
 //   GET  /api/mail/inbox  -> unread Primary mail (read only), marked when the sender is in your CRM
 //   POST /api/mail/threads -> {emails:[...]}, recent mail with those people (read only)
+//   POST /api/mail/message -> {id}, the readable text of one mail (read only, not stored)
 //   POST /api/meetings/new -> create a meeting note in your Notion Meetings database
 //   POST /api/crypto/search -> {symbols:[...]}, CoinMarketCap coins for those tickers (best rank first)
 //   POST /api/crypto/quotes -> {ids:[...]}, latest USD price and 24h change from CoinMarketCap (cached 60 s)
@@ -59,10 +60,10 @@ export default {
         if (url.pathname === '/api/calendar') return json(await calendar(env, url), 200, request, env);
         if (url.pathname === '/api/tasks') return json(await tasks(env, url), 200, request, env);
         if (url.pathname === '/api/mail/inbox') return json(await mailInbox(env), 200, request, env);
-        if (['/api/mail/threads', '/api/calendar/add', '/api/meetings/new', '/api/crypto/search', '/api/crypto/quotes'].includes(url.pathname)) {
+        if (['/api/mail/threads', '/api/mail/message', '/api/calendar/add', '/api/meetings/new', '/api/crypto/search', '/api/crypto/quotes'].includes(url.pathname)) {
           if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405, request, env);
           const body = await request.json().catch(() => ({}));
-          const fn = { '/api/mail/threads': mailThreads, '/api/calendar/add': calendarAdd, '/api/meetings/new': newMeeting, '/api/crypto/search': cryptoSearch, '/api/crypto/quotes': cryptoQuotes }[url.pathname];
+          const fn = { '/api/mail/threads': mailThreads, '/api/mail/message': mailMessage, '/api/calendar/add': calendarAdd, '/api/meetings/new': newMeeting, '/api/crypto/search': cryptoSearch, '/api/crypto/quotes': cryptoQuotes }[url.pathname];
           return json(await fn(env, body), 200, request, env);
         }
         if (url.pathname === '/api/brief') {
@@ -686,6 +687,45 @@ async function mailInbox(env) {
     unread: list.nextPageToken ? (list.resultSizeEstimate || messages.length) : messages.length,
     messages: messages.map(m => ({ ...m, crm: crm[m.from.email] || null })),
   };
+}
+
+
+// One mail's readable text for the inline view. Quoted history is cut and the result is capped, so it stays a quick read.
+export function b64url(s) {
+  try { const bin = atob(String(s).replace(/-/g, '+').replace(/_/g, '/')); return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0))); } catch { return ''; }
+}
+export function cleanBody(raw, max = 1800) {
+  let t = '\n' + String(raw || '').replace(/\r\n/g, '\n');
+  for (const m of [/\nOn .{5,160} wrote:\s*\n/i, /\nEl .{5,160} escribi[oó]:\s*\n/i, /\n-{2,}\s*(Original Message|Mensaje original)\s*-{2,}/i, /\nFrom:\s.+\n(Sent|Date):\s/i, /\n_{8,}\n/]) {
+    const i = t.search(m); if (i >= 0 && t.slice(0, i).trim().length >= 2) t = t.slice(0, i); // never cut a mail down to nothing
+  }
+  t = t.split('\n').filter(l => !/^\s*>/.test(l)).join('\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  let truncated = false;
+  if (t.length > max) { t = t.slice(0, max).replace(/\s+\S*$/, ''); truncated = true; }
+  return { text: t, truncated };
+}
+export function bodyOf(payload) {
+  const found = { plain: '', html: '', files: [] };
+  const walk = part => {
+    if (!part) return;
+    if (part.filename) found.files.push({ name: part.filename, size: Number(part.body?.size) || 0 });
+    else if (part.body?.data) {
+      const txt = b64url(part.body.data);
+      if (part.mimeType === 'text/plain' && !found.plain) found.plain = txt;
+      else if (part.mimeType === 'text/html' && !found.html) found.html = txt;
+    }
+    (part.parts || []).forEach(walk);
+  };
+  walk(payload);
+  const raw = found.plain || htmlToText(found.html.replace(/<(style|script|head)[\s\S]*?<\/\1>/gi, ''));
+  return { ...cleanBody(raw), files: found.files.slice(0, 6) };
+}
+async function mailMessage(env, b) {
+  const id = String(b.id || '');
+  if (!/^[0-9a-f]{6,32}$/i.test(id)) throw fail('Bad mail id.', 400, true);
+  const m = await ggmail(env, `users/me/messages/${id}?format=full`);
+  const body = bodyOf(m.payload);
+  return { id: m.id, text: body.text || decodeEntities(m.snippet || ''), truncated: body.truncated, files: body.files };
 }
 
 async function mailThreads(env, b) {

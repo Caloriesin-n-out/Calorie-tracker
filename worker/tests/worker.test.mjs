@@ -1,5 +1,5 @@
 // Run with: npm test (from the worker folder). Google, Gmail and Notion are simulated; nothing leaves the machine.
-import worker, { htmlToText, buildEvent, parseFrom, decodeEntities } from '../worker.js';
+import worker, { htmlToText, buildEvent, parseFrom, decodeEntities, cleanBody, bodyOf, b64url } from '../worker.js';
 import assert from 'node:assert/strict';
 
 const store = new Map([['refreshToken', 'HEALTH_RT'], ['refreshToken:calendar', 'CAL_RT']]);
@@ -48,6 +48,15 @@ globalThis.fetch = async (url, init = {}) => {
   // Gmail
   if (url.startsWith('https://gmail.googleapis.com')) {
     if (calMode === 'nogmail') return J({ error: { code: 403, message: 'Request had insufficient authentication scopes.' } }, 403);
+    if (dec.includes('format=full')) {
+      const e = x => Buffer.from(x, 'utf8').toString('base64url');
+      if (url.includes('/messages/abc123def456')) return J({ id: 'abc123def456', snippet: 'snip', payload: { mimeType: 'multipart/mixed', parts: [
+        { mimeType: 'multipart/alternative', parts: [{ mimeType: 'text/plain', body: { data: e('Hi Matthias,\n\nCan we move kickoff to the 16th? Caf\u00e9 at 9?\n\nThanks,\nDana\n\nOn Mon, 2 Nov 2026 at 09:00, Matthias <me@x.com> wrote:\n> earlier text\n> more') } }, { mimeType: 'text/html', body: { data: e('<p>html version</p>') } }] },
+        { mimeType: 'application/pdf', filename: 'terms.pdf', body: { size: 2048 } }] } });
+      if (url.includes('/messages/f00dfeed0001')) return J({ id: 'f00dfeed0001', snippet: '', payload: { mimeType: 'text/html', body: { data: e('<html><head><style>p{color:red}</style></head><body><p>Hello <b>there</b></p><div>Second line &amp; more</div></body></html>') } } });
+      if (url.includes('/messages/f00dfeed0002')) return J({ id: 'f00dfeed0002', snippet: 'Only a snippet', payload: { mimeType: 'multipart/mixed', parts: [] } });
+      if (url.includes('/messages/f00dfeed0003')) return J({ id: 'f00dfeed0003', payload: { mimeType: 'text/plain', body: { data: e('word '.repeat(600)) } } });
+    }
     if (url.includes('/profile')) return J({ emailAddress: 'me@x.com' });
     if (url.includes('/labels/INBOX')) return J({ threadsUnread: 7, messagesUnread: 9 });
     if (url.includes('/messages?')) {
@@ -170,6 +179,23 @@ assert.deepEqual(await (await post('/api/mail/threads', { emails: [] })).json(),
 calMode = 'nogmail'; store.set('accessToken:calendar', 'AT');
 res = await req('/api/mail/inbox'); assert.equal(res.status, 403); assert.match((await res.json()).error, /Gmail permission is missing/); calMode = 'ok';
 assert.equal(store.get('lastError') ?? null, null, 'mail and calendar problems never look like a Fitbit error');
+
+// ---- one mail's text for the inline view
+assert.equal(cleanBody('Sure!\n\nOn Mon, 2 Nov 2026 at 09:00, Dana <d@x.com> wrote:\n> old\n> older').text, 'Sure!', 'a short reply loses its quoted history');
+assert.equal(cleanBody('On Mon, 2 Nov 2026 at 09:00, Dana <d@x.com> wrote:\nonly quoted text here').text.length > 0, true, 'never cut to nothing');
+assert.equal(cleanBody('A short note that is long enough to keep.\n> quoted line\nand a last line').text, 'A short note that is long enough to keep.\nand a last line');
+assert.equal(cleanBody('x'.repeat(10) + ' ' + 'y '.repeat(2000), 100).truncated, true);
+assert.equal(b64url(Buffer.from('Caf\u00e9', 'utf8').toString('base64url')), 'Caf\u00e9');
+assert.equal(b64url('***not base64***'), '');
+res = await post('/api/mail/message', { id: 'abc123def456' }); r = await res.json();
+assert.equal(res.status, 200, JSON.stringify(r)); assert.match(r.text, /^Hi Matthias,\n\nCan we move kickoff to the 16th\? Caf\u00e9 at 9\?\n\nThanks,\nDana$/, r.text); assert.ok(!/earlier text|wrote/.test(r.text), 'quoted history is cut');
+assert.deepEqual(r.files, [{ name: 'terms.pdf', size: 2048 }]); assert.equal(r.truncated, false);
+r = await (await post('/api/mail/message', { id: 'f00dfeed0001' })).json(); assert.equal(r.text, 'Hello there\n\nSecond line & more', 'html-only mail becomes text without the style block');
+r = await (await post('/api/mail/message', { id: 'f00dfeed0002' })).json(); assert.equal(r.text, 'Only a snippet', 'falls back to the snippet');
+r = await (await post('/api/mail/message', { id: 'f00dfeed0003' })).json(); assert.equal(r.truncated, true); assert.ok(r.text.length <= 1800);
+assert.equal((await post('/api/mail/message', { id: '../../users/me/drafts' })).status, 400); assert.equal((await post('/api/mail/message', {})).status, 400); assert.equal((await req('/api/mail/message')).status, 405);
+calMode = 'nogmail'; store.set('accessToken:calendar', 'AT'); res = await post('/api/mail/message', { id: 'abc123def456' }); assert.equal(res.status, 403); calMode = 'ok';
+assert.ok(!calls.some(c => c.url.includes('/messages/abc123def456') && c.init.method && c.init.method !== 'GET'), 'reading a mail never writes to it');
 
 // ---- Notion tasks, CRM brief, meeting notes
 r = await (await req('/api/tasks?date=2026-11-01')).json(); assert.deepEqual(r.open.map(t => t.title), ['Pay rent', 'Plan trip']); assert.deepEqual(r.doneOn.map(t => t.title), ['Sent invoice']);
