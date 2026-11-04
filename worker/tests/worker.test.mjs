@@ -17,7 +17,7 @@ const person = (id, name, email) => ({ id, url: 'https://notion.so/' + id, prope
   'History summary': { rich_text: [{ plain_text: 'Wants a pilot.' }] }, 'Last Contacted': { formula: { type: 'date', date: { start: '2026-10-01' } } }, 'Follow-up Status': { formula: { type: 'string', string: 'Overdue' } }, 'Latest Interaction': { rollup: { type: 'date', date: null } } } });
 const RID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const restaurant = (id, name, over = {}) => ({ id, url: 'https://notion.so/' + id, properties: { Name: { title: [{ plain_text: name }] }, City: { select: { name: 'Costa Brava' } }, Area: { rich_text: [{ plain_text: 'Llafranc' }] },
-  Cuisine: { select: { name: 'Japanese' } }, Meal: { multi_select: [{ name: 'Lunch' }] }, Price: { select: null }, Favourite: { checkbox: true }, 'Booking method': { select: { name: 'CoverManager' } },
+  Cuisine: { select: { name: 'Japanese' } }, Meal: { multi_select: [{ name: 'Lunch' }] }, Tags: { multi_select: [{ name: 'Sea view' }] }, Price: { select: null }, Favourite: { checkbox: true }, 'Booking method': { select: { name: 'CoverManager' } },
   'Booking link': { url: 'https://book.example/far' }, 'Platform id': { rich_text: [] }, Website: { url: null }, Phone: { phone_number: '+34 972 000 000' }, WhatsApp: { phone_number: null },
   'Card needed': { select: { name: 'Unknown' } }, 'Deposit / policy': { rich_text: [] }, Notes: { rich_text: [] }, 'Last visit': { date: null }, Visits: { number: null }, ...over }, created_time: '2026-11-02T10:00:00.000Z' });
 const msg = (id, thread, from, subject, labels, ms) => ({ id, threadId: thread, labelIds: labels, snippet: 'Hi &#39;there&#39; &amp; co', internalDate: String(ms), payload: { headers: [{ name: 'From', value: from }, { name: 'To', value: 'me@x.com' }, { name: 'Subject', value: subject }] } });
@@ -249,14 +249,16 @@ assert.equal(store.get('lastError') ?? null, null, 'price problems never look li
 // ---- Restaurants (Mesa)
 res = await post('/api/restaurants/list', {}); r = await res.json();
 assert.equal(res.status, 200, JSON.stringify(r)); assert.deepEqual(r.restaurants.map(x => x.name), ['Far Nomo', 'Filandón'], 'follows the pagination cursor');
-assert.deepEqual(r.restaurants[0], { id: 'r1', url: 'https://notion.so/r1', name: 'Far Nomo', city: 'Costa Brava', area: 'Llafranc', cuisine: 'Japanese', meals: ['Lunch'], price: '', favourite: true, method: 'CoverManager',
+assert.deepEqual(r.restaurants[0], { id: 'r1', url: 'https://notion.so/r1', name: 'Far Nomo', city: 'Costa Brava', area: 'Llafranc', cuisine: 'Japanese', meals: ['Lunch'], tags: ['Sea view'], price: '', favourite: true, method: 'CoverManager',
   bookingLink: 'https://book.example/far', platformId: '', website: '', phone: '+34 972 000 000', whatsapp: '', card: 'Unknown', policy: '', notes: '', lastVisit: null, visits: 0, wishlist: '', why: '', added: '2026-11-02' });
 assert.equal((await req('/api/restaurants/list')).status, 405, 'POST only');
 res = await post('/api/restaurants/update', { id: RID, fields: { card: 'Yes - deposit', visits: 2, lastVisit: '2026-11-07', policy: 'EUR 20 per person' } }); r = await res.json();
 assert.equal(res.status, 200, JSON.stringify(r)); assert.equal(r.restaurant.card, 'Yes - deposit'); assert.equal(r.restaurant.visits, 2);
 const rp = JSON.parse(calls.filter(c => c.url.includes('/pages/' + RID)).at(-1).init.body).properties;
 assert.deepEqual(rp['Card needed'], { select: { name: 'Yes - deposit' } }); assert.deepEqual(rp['Last visit'], { date: { start: '2026-11-07' } }); assert.equal(rp['Deposit / policy'].rich_text[0].text.content, 'EUR 20 per person');
-for (const bad of [{ card: 'Maybe' }, { method: 'Fax' }, { bookingLink: 'javascript:alert(1)' }, { phone: 'call me' }, { visits: -1 }, { visits: 1.5 }, { lastVisit: 'tomorrow' }, { city: 'Paris' }, { meals: ['Snack'] }, { name: '' }]) {
+res = await post('/api/restaurants/update', { id: RID, fields: { tags: ['Terrace', 'Terrace', 'Romantic'] } }); assert.equal(res.status, 200);
+assert.deepEqual(JSON.parse(calls.filter(c => c.url.includes('/pages/' + RID)).at(-1).init.body).properties.Tags, { multi_select: [{ name: 'Terrace' }, { name: 'Romantic' }] }, 'tags are de-duplicated');
+for (const bad of [{ card: 'Maybe' }, { method: 'Fax' }, { bookingLink: 'javascript:alert(1)' }, { phone: 'call me' }, { visits: -1 }, { visits: 1.5 }, { lastVisit: 'tomorrow' }, { city: 'Paris' }, { meals: ['Snack'] }, { tags: ['Haunted'] }, { name: '' }]) {
   assert.equal((await post('/api/restaurants/update', { id: RID, fields: bad })).status, 400, JSON.stringify(bad));
 }
 assert.equal((await post('/api/restaurants/update', { id: 'nope', fields: { card: 'No' } })).status, 400);

@@ -767,6 +767,7 @@ const R_METHODS = ['CoverManager', 'Molzait', 'TheFork', 'Own website', 'Phone',
 const R_CARDS = ['Unknown', 'No', 'Yes - guarantee', 'Yes - deposit'];
 const R_PRICES = ['€', '€€', '€€€', '€€€€'];
 const R_MEALS = ['Lunch', 'Dinner', 'Brunch'];
+const R_TAGS = ['Terrace', 'Sea view', 'Group-friendly', 'Kids welcome', 'Romantic', 'Special occasion', 'Casual', 'Fine dining', 'Vegetarian options', 'Dog-friendly', 'Quiet', 'Lively'];
 // Wishlist: a place you have not been to yet. Empty means a place you have been (a normal favourite); "I've been" simply clears it.
 const R_WISHLIST = ['Want to try', 'Booked'];
 
@@ -774,7 +775,7 @@ export function mapRestaurant(p) {
   const pr = p.properties || {}, text = a => (a || []).map(t => t.plain_text).join('').trim();
   return {
     id: p.id, url: p.url, name: text(pr.Name?.title) || '(untitled)', city: pr.City?.select?.name || '', area: text(pr.Area?.rich_text),
-    cuisine: pr.Cuisine?.select?.name || '', meals: (pr.Meal?.multi_select || []).map(o => o.name), price: pr.Price?.select?.name || '',
+    cuisine: pr.Cuisine?.select?.name || '', meals: (pr.Meal?.multi_select || []).map(o => o.name), tags: (pr.Tags?.multi_select || []).map(o => o.name), price: pr.Price?.select?.name || '',
     favourite: !!pr.Favourite?.checkbox, method: pr['Booking method']?.select?.name || 'Unknown', bookingLink: pr['Booking link']?.url || '',
     platformId: text(pr['Platform id']?.rich_text), website: pr.Website?.url || '', phone: pr.Phone?.phone_number || '', whatsapp: pr.WhatsApp?.phone_number || '',
     card: pr['Card needed']?.select?.name || 'Unknown', policy: text(pr['Deposit / policy']?.rich_text), notes: text(pr.Notes?.rich_text),
@@ -798,6 +799,7 @@ export function restaurantProps(b, creating = false) {
   if (has('area')) out.Area = rtext(b.area, 100);
   if (has('cuisine')) { const c = String(b.cuisine || '').trim().replace(/,/g, ' '); if (c.length > 40) bad('Cuisine is too long.'); out.Cuisine = { select: c ? { name: c } : null }; }
   if (has('meals')) { const m = Array.isArray(b.meals) ? b.meals : []; if (m.some(x => !R_MEALS.includes(x))) bad('Unknown meal.'); out.Meal = { multi_select: m.map(name => ({ name })) }; }
+  if (has('tags')) { const t = Array.isArray(b.tags) ? b.tags : []; if (t.some(x => !R_TAGS.includes(x))) bad('Unknown tag.'); out.Tags = { multi_select: [...new Set(t)].map(name => ({ name })) }; }
   if (has('price')) { if (b.price && !R_PRICES.includes(b.price)) bad('Unknown price level.'); out.Price = { select: b.price ? { name: b.price } : null }; }
   if (has('favourite')) out.Favourite = { checkbox: !!b.favourite };
   if (has('method')) { if (!R_METHODS.includes(b.method)) bad('Unknown booking method.'); out['Booking method'] = { select: { name: b.method } }; }
