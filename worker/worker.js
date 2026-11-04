@@ -20,6 +20,7 @@
 //   POST /api/mail/threads -> {emails:[...]}, recent mail with those people (read only)
 //   POST /api/mail/message -> {id}, the readable text of one mail (read only, not stored)
 //   POST /api/meetings/new -> create a meeting note in your Notion Meetings database
+//   POST /api/restaurants/list | update | add | archive -> favourites and wishlist places (Mesa app; wishlist = places not visited yet)
 //   POST /api/crypto/search -> {symbols:[...]}, CoinMarketCap coins for those tickers (best rank first)
 //   POST /api/crypto/quotes -> {ids:[...]}, latest USD price and 24h change from CoinMarketCap (cached 60 s)
 // CoinMarketCap (optional): secret CMC_API_KEY (a free key from pro.coinmarketcap.com).
@@ -60,11 +61,11 @@ export default {
         if (url.pathname === '/api/calendar') return json(await calendar(env, url), 200, request, env);
         if (url.pathname === '/api/tasks') return json(await tasks(env, url), 200, request, env);
         if (url.pathname === '/api/mail/inbox') return json(await mailInbox(env), 200, request, env);
-        if (['/api/mail/threads', '/api/mail/message', '/api/calendar/add', '/api/meetings/new', '/api/crypto/search', '/api/crypto/quotes', '/api/restaurants/list', '/api/restaurants/update', '/api/restaurants/add'].includes(url.pathname)) {
+        if (['/api/mail/threads', '/api/mail/message', '/api/calendar/add', '/api/meetings/new', '/api/crypto/search', '/api/crypto/quotes', '/api/restaurants/list', '/api/restaurants/update', '/api/restaurants/add', '/api/restaurants/archive'].includes(url.pathname)) {
           if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405, request, env);
           const body = await request.json().catch(() => ({}));
           const fn = { '/api/mail/threads': mailThreads, '/api/mail/message': mailMessage, '/api/calendar/add': calendarAdd, '/api/meetings/new': newMeeting, '/api/crypto/search': cryptoSearch, '/api/crypto/quotes': cryptoQuotes,
-            '/api/restaurants/list': restaurantList, '/api/restaurants/update': restaurantUpdate, '/api/restaurants/add': restaurantAdd }[url.pathname];
+            '/api/restaurants/list': restaurantList, '/api/restaurants/update': restaurantUpdate, '/api/restaurants/add': restaurantAdd, '/api/restaurants/archive': restaurantArchive }[url.pathname];
           return json(await fn(env, body), 200, request, env);
         }
         if (url.pathname === '/api/brief') {
@@ -766,6 +767,8 @@ const R_METHODS = ['CoverManager', 'Molzait', 'TheFork', 'Own website', 'Phone',
 const R_CARDS = ['Unknown', 'No', 'Yes - guarantee', 'Yes - deposit'];
 const R_PRICES = ['€', '€€', '€€€', '€€€€'];
 const R_MEALS = ['Lunch', 'Dinner', 'Brunch'];
+// Wishlist: a place you have not been to yet. Empty means a place you have been (a normal favourite); "I've been" simply clears it.
+const R_WISHLIST = ['Want to try', 'Booked'];
 
 export function mapRestaurant(p) {
   const pr = p.properties || {}, text = a => (a || []).map(t => t.plain_text).join('').trim();
@@ -776,6 +779,7 @@ export function mapRestaurant(p) {
     platformId: text(pr['Platform id']?.rich_text), website: pr.Website?.url || '', phone: pr.Phone?.phone_number || '', whatsapp: pr.WhatsApp?.phone_number || '',
     card: pr['Card needed']?.select?.name || 'Unknown', policy: text(pr['Deposit / policy']?.rich_text), notes: text(pr.Notes?.rich_text),
     lastVisit: pr['Last visit']?.date?.start || null, visits: pr.Visits?.number ?? 0,
+    wishlist: pr.Wishlist?.select?.name || '', why: text(pr['Why / recommended by']?.rich_text), added: (p.created_time || '').slice(0, 10),
   };
 }
 
@@ -804,6 +808,8 @@ export function restaurantProps(b, creating = false) {
   if (has('policy')) out['Deposit / policy'] = rtext(b.policy);
   if (has('notes')) out.Notes = rtext(b.notes);
   if (has('lastVisit')) { if (b.lastVisit && !isDate(b.lastVisit)) bad('Bad date.'); out['Last visit'] = { date: b.lastVisit ? { start: b.lastVisit } : null }; }
+  if (has('wishlist')) { if (b.wishlist && !R_WISHLIST.includes(b.wishlist)) bad('Unknown wishlist status.'); out.Wishlist = { select: b.wishlist ? { name: b.wishlist } : null }; }
+  if (has('why')) out['Why / recommended by'] = rtext(b.why);
   if (has('visits')) { const n = Number(b.visits); if (!Number.isInteger(n) || n < 0 || n > 999) bad('Visits must be a whole number.'); out.Visits = { number: n }; }
   return out;
 }
@@ -841,6 +847,13 @@ async function restaurantAdd(env, b) {
   properties['Booking method'] = properties['Booking method'] || { select: { name: 'Unknown' } };
   properties['Card needed'] = properties['Card needed'] || { select: { name: 'Unknown' } };
   try { return { restaurant: mapRestaurant(await notion(env, 'pages', 'POST', { parent: { database_id: db }, properties })) }; } catch (e) { throw restaurantHint(e); }
+}
+
+// Archive (Notion's trash, restorable) or restore a place. Only the archived flag is touched.
+async function restaurantArchive(env, b) {
+  restaurantDb(env);
+  if (!isPageId(b.id)) throw fail('Need a restaurant id.', 400, true);
+  try { return { restaurant: mapRestaurant(await notion(env, `pages/${b.id}`, 'PATCH', { archived: b.archived !== false })) }; } catch (e) { throw restaurantHint(e); }
 }
 
 /* ---------------- CoinMarketCap prices (read only) ---------------- */

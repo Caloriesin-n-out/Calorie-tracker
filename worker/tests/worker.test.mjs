@@ -19,7 +19,7 @@ const RID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const restaurant = (id, name, over = {}) => ({ id, url: 'https://notion.so/' + id, properties: { Name: { title: [{ plain_text: name }] }, City: { select: { name: 'Costa Brava' } }, Area: { rich_text: [{ plain_text: 'Llafranc' }] },
   Cuisine: { select: { name: 'Japanese' } }, Meal: { multi_select: [{ name: 'Lunch' }] }, Price: { select: null }, Favourite: { checkbox: true }, 'Booking method': { select: { name: 'CoverManager' } },
   'Booking link': { url: 'https://book.example/far' }, 'Platform id': { rich_text: [] }, Website: { url: null }, Phone: { phone_number: '+34 972 000 000' }, WhatsApp: { phone_number: null },
-  'Card needed': { select: { name: 'Unknown' } }, 'Deposit / policy': { rich_text: [] }, Notes: { rich_text: [] }, 'Last visit': { date: null }, Visits: { number: null }, ...over } });
+  'Card needed': { select: { name: 'Unknown' } }, 'Deposit / policy': { rich_text: [] }, Notes: { rich_text: [] }, 'Last visit': { date: null }, Visits: { number: null }, ...over }, created_time: '2026-11-02T10:00:00.000Z' });
 const msg = (id, thread, from, subject, labels, ms) => ({ id, threadId: thread, labelIds: labels, snippet: 'Hi &#39;there&#39; &amp; co', internalDate: String(ms), payload: { headers: [{ name: 'From', value: from }, { name: 'To', value: 'me@x.com' }, { name: 'Subject', value: subject }] } });
 
 globalThis.fetch = async (url, init = {}) => {
@@ -104,7 +104,7 @@ globalThis.fetch = async (url, init = {}) => {
       return body.start_cursor ? J({ results: [restaurant('r2', 'Filandón', { City: { select: { name: 'Madrid' } }, Favourite: { checkbox: false } })], has_more: false })
         : J({ results: [restaurant('r1', 'Far Nomo')], has_more: true, next_cursor: 'c2' });
     }
-    if (url.includes('/pages/' + RID) && init.method === 'PATCH') return J(restaurant(RID, 'Far Nomo', { 'Card needed': body.properties['Card needed'] || { select: { name: 'Unknown' } }, Visits: body.properties.Visits || { number: null } }));
+    if (url.includes('/pages/' + RID) && init.method === 'PATCH') return J(restaurant(RID, 'Far Nomo', { 'Card needed': body.properties?.['Card needed'] || { select: { name: 'Unknown' } }, Visits: body.properties?.Visits || { number: null } }));
     if (url.endsWith('/databases/2e2e528f-adf8-8195-bced-f39c537ae294/query')) {
       if (body.filter.property === 'Completion Date') return J({ results: [page('p3', 'Sent invoice', 'Done', '2026-10-30', '2026-11-01')] });
       if (body.filter.and[0].or) return J({ results: [page('t9', 'Send pilot terms', 'Not started', '2026-11-03', null, { 'Waiting on': { checkbox: true }, Person: { relation: [{ id: 'per3' }] } })] });
@@ -250,7 +250,7 @@ assert.equal(store.get('lastError') ?? null, null, 'price problems never look li
 res = await post('/api/restaurants/list', {}); r = await res.json();
 assert.equal(res.status, 200, JSON.stringify(r)); assert.deepEqual(r.restaurants.map(x => x.name), ['Far Nomo', 'Filandón'], 'follows the pagination cursor');
 assert.deepEqual(r.restaurants[0], { id: 'r1', url: 'https://notion.so/r1', name: 'Far Nomo', city: 'Costa Brava', area: 'Llafranc', cuisine: 'Japanese', meals: ['Lunch'], price: '', favourite: true, method: 'CoverManager',
-  bookingLink: 'https://book.example/far', platformId: '', website: '', phone: '+34 972 000 000', whatsapp: '', card: 'Unknown', policy: '', notes: '', lastVisit: null, visits: 0 });
+  bookingLink: 'https://book.example/far', platformId: '', website: '', phone: '+34 972 000 000', whatsapp: '', card: 'Unknown', policy: '', notes: '', lastVisit: null, visits: 0, wishlist: '', why: '', added: '2026-11-02' });
 assert.equal((await req('/api/restaurants/list')).status, 405, 'POST only');
 res = await post('/api/restaurants/update', { id: RID, fields: { card: 'Yes - deposit', visits: 2, lastVisit: '2026-11-07', policy: 'EUR 20 per person' } }); r = await res.json();
 assert.equal(res.status, 200, JSON.stringify(r)); assert.equal(r.restaurant.card, 'Yes - deposit'); assert.equal(r.restaurant.visits, 2);
@@ -270,5 +270,20 @@ res = await worker.fetch(new Request('https://x.test/api/restaurants/list', { me
 notionMode = 'unshared'; r = await (await post('/api/restaurants/list', {})).json(); assert.match(r.error, /Connections/); notionMode = 'ok';
 assert.equal((await (await req('/api/status')).json()).restaurantsDb, true);
 assert.deepEqual(Object.keys(restaurantProps({ name: 'X', city: 'Vienna' }, true)), ['Name', 'City']);
+
+// ---- Wishlist (places not visited yet, same database)
+res = await post('/api/restaurants/add', { name: 'Gresca', city: 'Madrid', wishlist: 'Want to try', why: 'Recommended by Ana, tasting menu' }); r = await res.json();
+assert.equal(res.status, 200, JSON.stringify(r));
+const wp = JSON.parse(calls.filter(c => c.url.endsWith('/v1/pages')).at(-1).init.body).properties;
+assert.deepEqual(wp.Wishlist, { select: { name: 'Want to try' } }); assert.equal(wp['Why / recommended by'].rich_text[0].text.content, 'Recommended by Ana, tasting menu');
+res = await post('/api/restaurants/update', { id: RID, fields: { wishlist: '', visits: 1, favourite: true } }); assert.equal(res.status, 200, 'clearing the wishlist flag means "I have been"');
+assert.deepEqual(JSON.parse(calls.filter(c => c.url.includes('/pages/' + RID)).at(-1).init.body).properties.Wishlist, { select: null });
+assert.equal((await post('/api/restaurants/update', { id: RID, fields: { wishlist: 'Been' } })).status, 400, 'Been is not stored: clear the flag instead');
+assert.deepEqual(mapRestaurant({ id: 'w', properties: { Name: { title: [{ plain_text: 'W' }] }, Wishlist: { select: { name: 'Booked' } }, 'Why / recommended by': { rich_text: [{ plain_text: 'Tip' }] } }, created_time: '2026-11-04T08:00:00Z' }).wishlist, 'Booked');
+res = await post('/api/restaurants/archive', { id: RID }); r = await res.json(); assert.equal(res.status, 200, JSON.stringify(r));
+assert.deepEqual(JSON.parse(calls.filter(c => c.url.includes('/pages/' + RID)).at(-1).init.body), { archived: true });
+await post('/api/restaurants/archive', { id: RID, archived: false }); assert.deepEqual(JSON.parse(calls.filter(c => c.url.includes('/pages/' + RID)).at(-1).init.body), { archived: false }, 'undo restores');
+assert.equal((await post('/api/restaurants/archive', { id: 'nope' })).status, 400);
+assert.equal((await req('/api/restaurants/archive')).status, 405, 'POST only');
 
 console.log('worker tests passed');
