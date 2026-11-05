@@ -783,7 +783,7 @@ export function mapRestaurant(p) {
     favourite: !!pr.Favourite?.checkbox, method: pr['Booking method']?.select?.name || 'Unknown', bookingLink: pr['Booking link']?.url || '',
     platformId: text(pr['Platform id']?.rich_text), website: pr.Website?.url || '', phone: pr.Phone?.phone_number || '', whatsapp: pr.WhatsApp?.phone_number || '',
     card: pr['Card needed']?.select?.name || 'Unknown', policy: text(pr['Deposit / policy']?.rich_text), notes: text(pr.Notes?.rich_text),
-    lastVisit: pr['Last visit']?.date?.start || null, visits: pr.Visits?.number ?? 0,
+    lastVisit: pr['Last visit']?.date?.start || null, visits: pr.Visits?.number ?? 0, rating: typeof pr['My rating']?.number === 'number' ? pr['My rating'].number : null,
     wishlist: pr.Wishlist?.select?.name || '', why: text(pr['Why / recommended by']?.rich_text), added: (p.created_time || '').slice(0, 10),
   };
 }
@@ -816,6 +816,7 @@ export function restaurantProps(b, creating = false) {
   if (has('lastVisit')) { if (b.lastVisit && !isDate(b.lastVisit)) bad('Bad date.'); out['Last visit'] = { date: b.lastVisit ? { start: b.lastVisit } : null }; }
   if (has('wishlist')) { if (b.wishlist && !R_WISHLIST.includes(b.wishlist)) bad('Unknown wishlist status.'); out.Wishlist = { select: b.wishlist ? { name: b.wishlist } : null }; }
   if (has('why')) out['Why / recommended by'] = rtext(b.why);
+  if (has('rating')) { const n = b.rating === null || b.rating === '' ? null : Number(b.rating); if (n !== null && (!Number.isInteger(n) || n < 1 || n > 10)) bad('Your score is a whole number from 1 to 10.'); out['My rating'] = { number: n }; }
   if (has('visits')) { const n = Number(b.visits); if (!Number.isInteger(n) || n < 0 || n > 999) bad('Visits must be a whole number.'); out.Visits = { number: n }; }
   return out;
 }
