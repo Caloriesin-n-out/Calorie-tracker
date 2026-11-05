@@ -1003,8 +1003,33 @@ export function zonedToUtc(date, time, tz) {
 const slug = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const BOOKING_SENDERS = 'noreply@covermanager.com OR noreply@myrestoo.net OR info@email.thefork.com OR noreply@thefork.com OR no-reply@thefork.com';
 
+// Rebuild the list of bookings from the emails alone: no calendar changes and nothing is marked as handled. Used when Mesa is set up on a new phone.
+async function bookingsRebuild(env, days) {
+  const list = await ggmail(env, `users/me/messages?${new URLSearchParams({ q: `from:(${BOOKING_SENDERS}) newer_than:${days}d`, maxResults: '100' })}`);
+  const full = [];
+  for (const m of list.messages || []) {
+    const g = await ggmail(env, `users/me/messages/${encodeURIComponent(m.id)}?format=full`);
+    const hdr = n => (g.payload?.headers || []).find(h => h.name.toLowerCase() === n)?.value || '';
+    full.push({ at: Number(g.internalDate) || 0, subject: decodeEntities(hdr('subject')), from: parseFrom(hdr('from')), text: bodyOf(g.payload).text || decodeEntities(g.snippet || '') });
+  }
+  full.sort((x, y) => x.at - y.at);
+  const state = new Map();
+  for (const m of full) {
+    const p = parseBooking(m.text, m.subject, m.from.name, m.at);
+    if (!p) continue;
+    const key = `${slug(p.name)}|${p.date}|${p.time}`;
+    if (p.kind === 'cancelled') { state.set(key, { key, ...p, status: 'cancelled' }); continue; }
+    if (p.kind === 'modified') for (const [k, v] of state) if (k !== key && slug(v.name) === slug(p.name) && v.status === 'booked') v.status = 'cancelled';
+    state.set(key, { key, ...p, status: 'booked' });
+  }
+  const bookings = [];
+  for (const v of state.values()) bookings.push({ ...v, cal: v.status === 'booked' && !!(await env.TOKENS.get('booking:' + v.key, 'json'))?.eventId });
+  return { bookings, scanned: full.length, rebuilt: true };
+}
+
 async function bookingsScan(env, b) {
   const days = Math.max(1, Math.min(120, Math.floor(Number(b.days)) || 45));
+  if (b.rescan) return bookingsRebuild(env, days);
   const tzOf = /^[A-Za-z][A-Za-z0-9_+\-]*(\/[A-Za-z0-9_+\-]+){0,2}$/.test(b.timeZone || '') ? b.timeZone : 'Europe/Madrid';
   const q = `from:(${BOOKING_SENDERS}) newer_than:${days}d`;
   const list = await ggmail(env, `users/me/messages?${new URLSearchParams({ q, maxResults: '60' })}`);
