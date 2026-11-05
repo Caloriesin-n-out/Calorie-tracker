@@ -863,7 +863,7 @@ async function restaurantArchive(env, b) {
 }
 
 // Add a place that was shared from Google Maps (share sheet text and/or link) to the wishlist.
-const MAPS_URL = /https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps|(?:www\.)?google\.[a-z.]{2,6}\/maps|maps\.google\.[a-z.]{2,6})[^\s<>"]*/i;
+const MAPS_URL = /https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps|g\.co\/kgs|share\.google|(?:www\.)?google\.[a-z.]{2,6}\/(?:maps|search)|maps\.google\.[a-z.]{2,6})[^\s<>"]*/i;
 const COSTA_BRAVA = /\b(begur|palafrugell|pals|calella|llafranc|tamariu|girona|torroella|regenc[oó]s|platja d['’]aro|sant feliu|sa tuna|aiguablava|peratallada|l['’]escala|roses|cadaqu[eé]s|figueres|la bisbal|lloret|tossa|blanes|l['’]estartit|costa brava)\b/i;
 export function guessCity(s) {
   if (/\bmadrid\b/i.test(s)) return 'Madrid';
