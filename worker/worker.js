@@ -763,7 +763,7 @@ async function newMeeting(env, b) {
 /* ---------------- Notion: restaurant favourites (Mesa app) ---------------- */
 
 const R_CITIES = ['Madrid', 'Costa Brava', 'Vienna'];
-const R_METHODS = ['CoverManager', 'Molzait', 'TheFork', 'Own website', 'Phone', 'WhatsApp', 'Email', 'Walk-in', 'Unknown'];
+const R_METHODS = ['CoverManager', 'Molzait', 'TheFork', 'Myrestoo', 'Agora POS', 'Own website', 'Phone', 'WhatsApp', 'Email', 'Walk-in', 'Unknown'];
 const R_CARDS = ['Unknown', 'No', 'Yes - guarantee', 'Yes - deposit'];
 const R_PRICES = ['€', '€€', '€€€', '€€€€'];
 const R_MEALS = ['Lunch', 'Dinner', 'Brunch'];

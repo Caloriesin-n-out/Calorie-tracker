@@ -256,6 +256,7 @@ res = await post('/api/restaurants/update', { id: RID, fields: { card: 'Yes - de
 assert.equal(res.status, 200, JSON.stringify(r)); assert.equal(r.restaurant.card, 'Yes - deposit'); assert.equal(r.restaurant.visits, 2);
 const rp = JSON.parse(calls.filter(c => c.url.includes('/pages/' + RID)).at(-1).init.body).properties;
 assert.deepEqual(rp['Card needed'], { select: { name: 'Yes - deposit' } }); assert.deepEqual(rp['Last visit'], { date: { start: '2026-11-07' } }); assert.equal(rp['Deposit / policy'].rich_text[0].text.content, 'EUR 20 per person');
+for (const m of ['Myrestoo', 'Agora POS']) { res = await post('/api/restaurants/update', { id: RID, fields: { method: m } }); assert.equal(res.status, 200, m); assert.deepEqual(JSON.parse(calls.filter(c => c.url.includes('/pages/' + RID)).at(-1).init.body).properties['Booking method'], { select: { name: m } }, m); }
 res = await post('/api/restaurants/update', { id: RID, fields: { tags: ['Terrace', 'Terrace', 'Romantic'] } }); assert.equal(res.status, 200);
 assert.deepEqual(JSON.parse(calls.filter(c => c.url.includes('/pages/' + RID)).at(-1).init.body).properties.Tags, { multi_select: [{ name: 'Terrace' }, { name: 'Romantic' }] }, 'tags are de-duplicated');
 for (const bad of [{ card: 'Maybe' }, { method: 'Fax' }, { bookingLink: 'javascript:alert(1)' }, { phone: 'call me' }, { visits: -1 }, { visits: 1.5 }, { lastVisit: 'tomorrow' }, { city: 'Paris' }, { meals: ['Snack'] }, { tags: ['Haunted'] }, { name: '' }]) {
