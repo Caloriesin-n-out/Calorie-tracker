@@ -1,11 +1,11 @@
 // Run with: npm test (from the worker folder). Google, Gmail and Notion are simulated; nothing leaves the machine.
-import worker, { htmlToText, buildEvent, parseFrom, decodeEntities, cleanBody, bodyOf, b64url, mapRestaurant, restaurantProps, guessCity, placeFromMapsUrl } from '../worker.js';
+import worker, { htmlToText, buildEvent, parseFrom, decodeEntities, cleanBody, bodyOf, b64url, mapRestaurant, restaurantProps, guessCity, placeFromMapsUrl, mapVisit } from '../worker.js';
 import assert from 'node:assert/strict';
 
 const store = new Map([['refreshToken', 'HEALTH_RT'], ['refreshToken:calendar', 'CAL_RT']]);
 const TOKENS = { get: async (k, type) => { const v = store.get(k) ?? null; return type === 'json' && v ? JSON.parse(v) : v; }, put: async (k, v) => { store.set(k, v); }, delete: async k => { store.delete(k); } };
 const env = { TOKENS, ALLOWED_ORIGIN: 'https://me.github.io', APP_KEY: 'sekret', GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs',
-  NOTION_TOKEN: 'ntn_x', NOTION_TASKS_DB: '2e2e528f-adf8-8195-bced-f39c537ae294', NOTION_PEOPLE_DB: '1af97b4b-1373-4867-b105-b6afc71ff37f', NOTION_MEETINGS_DB: '6311b063-37a4-468b-b661-111f32c063b2', NOTION_RESTAURANTS_DB: 'f5ce7d95-2e83-46f0-a0f4-3e7e441f632f', CMC_API_KEY: 'cmc_key' };
+  NOTION_TOKEN: 'ntn_x', NOTION_TASKS_DB: '2e2e528f-adf8-8195-bced-f39c537ae294', NOTION_PEOPLE_DB: '1af97b4b-1373-4867-b105-b6afc71ff37f', NOTION_MEETINGS_DB: '6311b063-37a4-468b-b661-111f32c063b2', NOTION_VISITS_DB: '54f5007a-41c1-463d-9fe3-1f4939d31fa6', NOTION_RESTAURANTS_DB: 'f5ce7d95-2e83-46f0-a0f4-3e7e441f632f', CMC_API_KEY: 'cmc_key' };
 let calls = [], calMode = 'ok', notionMode = 'ok', tokenCalls = [], cmcMode = 'ok', cmcCalls = 0;
 const J = (b, s = 200) => new Response(JSON.stringify(b), { status: s });
 const PID = '2e2e528f-adf8-8195-bced-f39c537ae294';
@@ -22,8 +22,12 @@ const restaurant = (id, name, over = {}) => ({ id, url: 'https://notion.so/' + i
   'Card needed': { select: { name: 'Unknown' } }, 'Deposit / policy': { rich_text: [] }, Notes: { rich_text: [] }, 'Last visit': { date: null }, Visits: { number: null }, ...over }, created_time: '2026-11-02T10:00:00.000Z' });
 const msg = (id, thread, from, subject, labels, ms) => ({ id, threadId: thread, labelIds: labels, snippet: 'Hi &#39;there&#39; &amp; co', internalDate: String(ms), payload: { headers: [{ name: 'From', value: from }, { name: 'To', value: 'me@x.com' }, { name: 'Subject', value: subject }] } });
 
+const visitPage = (id, d, r) => ({ id, properties: { Visit: { title: [{ plain_text: 'Far Nomo' }] }, Restaurant: { relation: [{ id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }] }, Date: { date: { start: d } }, 'What we ate': { rich_text: [{ plain_text: 'Gyoza' }] }, Rating: { number: r }, Notes: { rich_text: [] } } });
 globalThis.fetch = async (url, init = {}) => {
   url = String(url); calls.push({ url, init });
+  if (url.includes('/databases/54f5007a-41c1-463d-9fe3-1f4939d31fa6/query')) return J({ results: [visitPage('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1', '2026-05-01', 8), visitPage('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb2', '2026-11-02', 9)], has_more: false });
+  if (url.endsWith('/v1/pages') && init.method === 'POST' && JSON.parse(init.body).parent.database_id === '54f5007a-41c1-463d-9fe3-1f4939d31fa6') return J({ id: 'v3', properties: JSON.parse(init.body).properties });
+  if (url.endsWith('/pages/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1')) return J(visitPage('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1', '2026-05-01', 8));
   if (url.includes('maps.app.goo.gl')) { const r = new Response('<title>x</title>'); Object.defineProperty(r, 'url', { value: 'https://www.google.com/maps/place/Casa+Juli%C3%A1n+de+Tolosa,+C.+de+la+Cava+Baja,+18,+28005+Madrid/@40.41,-3.71,17z/data=!4m6' }); return r; }
   const dec = decodeURIComponent(url.replace(/\+/g, ' ')), body = init.body && typeof init.body === 'string' && init.body.startsWith('{') ? JSON.parse(init.body) : null;
   if (url.includes('oauth2.googleapis.com/token')) { tokenCalls.push(String(init.body)); return J({ access_token: 'AT', expires_in: 3599 }); }
@@ -303,5 +307,20 @@ assert.equal(res.status, 200); assert.equal(r.existing, true, 'a place already i
 assert.equal((await post('/api/restaurants/share', {})).status, 400);
 assert.equal(guessCity('Carrer Major 1, 17255 Begur'), 'Costa Brava'); assert.equal(guessCity('Walfischgasse 5, 1010 Wien'), 'Vienna'); assert.equal(guessCity('Rua Augusta, Lisboa'), '');
 assert.deepEqual(placeFromMapsUrl('https://consent.google.com/m?continue=' + encodeURIComponent('https://www.google.com/maps/place/Gresca,+Barcelona/@41,2')), { name: 'Gresca', address: 'Barcelona' });
+
+// ---- Visit log
+res = await post('/api/visits/list', {}); r = await res.json();
+assert.equal(res.status, 200, JSON.stringify(r)); assert.equal(r.visits.length, 2); assert.equal(r.visits[0].date, '2026-11-02', 'newest first'); assert.deepEqual(r.visits[0], { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb2', restaurantId: RID, date: '2026-11-02', ate: 'Gyoza', rating: 9, notes: '' });
+res = await post('/api/visits/add', { restaurantId: RID, name: 'Far Nomo', date: '2026-11-07', ate: 'Gyoza, black cod', rating: 9, notes: 'Window table' }); r = await res.json();
+assert.equal(res.status, 200, JSON.stringify(r));
+const vp = JSON.parse(calls.filter(c => c.url.endsWith('/v1/pages')).at(-1).init.body);
+assert.equal(vp.parent.database_id, '54f5007a-41c1-463d-9fe3-1f4939d31fa6'); assert.deepEqual(vp.properties.Restaurant, { relation: [{ id: RID }] }); assert.equal(vp.properties.Rating.number, 9); assert.match(vp.properties.Visit.title[0].text.content, /Far Nomo · 2026-11-07/);
+const sync = JSON.parse(calls.filter(c => c.url.includes('/pages/' + RID) && c.init.method === 'PATCH').at(-1).init.body).properties;
+assert.deepEqual(sync.Visits, { number: 2 }, 'visit count is recomputed from the log'); assert.deepEqual(sync['Last visit'], { date: { start: '2026-11-02' } }); assert.deepEqual(sync.Wishlist, { select: null }, 'a visited place leaves the wishlist');
+for (const bad of [{ restaurantId: 'nope', date: '2026-11-07' }, { restaurantId: RID, date: 'yesterday' }, { restaurantId: RID, date: '2026-11-07', rating: 11 }, { restaurantId: RID, date: '2026-11-07', rating: 7.5 }]) assert.equal((await post('/api/visits/add', bad)).status, 400, JSON.stringify(bad));
+res = await post('/api/visits/add', { restaurantId: RID, name: 'Far Nomo', date: '2026-11-08' }); assert.equal(res.status, 200, 'score and notes are optional');
+res = await post('/api/visits/delete', { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1' }); r = await res.json(); assert.equal(res.status, 200, JSON.stringify(r));
+assert.ok(calls.some(c => c.url.endsWith('/pages/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1') && c.init.method === 'PATCH' && JSON.parse(c.init.body).archived === true), 'deleting a visit archives it');
+res = await worker.fetch(new Request('https://x.test/api/visits/list', { method: 'POST', body: '{}', headers: { 'X-App-Key': 'sekret' } }), { ...env, NOTION_VISITS_DB: undefined }); assert.equal(res.status, 409);
 
 console.log('worker tests passed');

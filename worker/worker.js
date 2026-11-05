@@ -21,6 +21,7 @@
 //   POST /api/mail/message -> {id}, the readable text of one mail (read only, not stored)
 //   POST /api/meetings/new -> create a meeting note in your Notion Meetings database
 //   POST /api/restaurants/list | update | add | archive -> favourites and wishlist places (Mesa app; wishlist = places not visited yet)
+//   POST /api/visits/list | add | delete -> the visit log (Mesa Visits database): date, what you ate, score; keeps each restaurant's Visits and Last visit up to date
 //   POST /api/restaurants/share -> {text, url}, add a place shared from Google Maps to the wishlist (skips places already listed)
 //   POST /api/crypto/search -> {symbols:[...]}, CoinMarketCap coins for those tickers (best rank first)
 //   POST /api/crypto/quotes -> {ids:[...]}, latest USD price and 24h change from CoinMarketCap (cached 60 s)
@@ -62,11 +63,11 @@ export default {
         if (url.pathname === '/api/calendar') return json(await calendar(env, url), 200, request, env);
         if (url.pathname === '/api/tasks') return json(await tasks(env, url), 200, request, env);
         if (url.pathname === '/api/mail/inbox') return json(await mailInbox(env), 200, request, env);
-        if (['/api/mail/threads', '/api/mail/message', '/api/calendar/add', '/api/meetings/new', '/api/crypto/search', '/api/crypto/quotes', '/api/restaurants/list', '/api/restaurants/update', '/api/restaurants/add', '/api/restaurants/archive', '/api/restaurants/share'].includes(url.pathname)) {
+        if (['/api/mail/threads', '/api/mail/message', '/api/calendar/add', '/api/meetings/new', '/api/crypto/search', '/api/crypto/quotes', '/api/restaurants/list', '/api/restaurants/update', '/api/restaurants/add', '/api/restaurants/archive', '/api/restaurants/share', '/api/visits/list', '/api/visits/add', '/api/visits/delete'].includes(url.pathname)) {
           if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405, request, env);
           const body = await request.json().catch(() => ({}));
           const fn = { '/api/mail/threads': mailThreads, '/api/mail/message': mailMessage, '/api/calendar/add': calendarAdd, '/api/meetings/new': newMeeting, '/api/crypto/search': cryptoSearch, '/api/crypto/quotes': cryptoQuotes,
-            '/api/restaurants/list': restaurantList, '/api/restaurants/update': restaurantUpdate, '/api/restaurants/add': restaurantAdd, '/api/restaurants/archive': restaurantArchive, '/api/restaurants/share': restaurantShare }[url.pathname];
+            '/api/restaurants/list': restaurantList, '/api/restaurants/update': restaurantUpdate, '/api/restaurants/add': restaurantAdd, '/api/restaurants/archive': restaurantArchive, '/api/restaurants/share': restaurantShare, '/api/visits/list': visitList, '/api/visits/add': visitAdd, '/api/visits/delete': visitDelete }[url.pathname];
           return json(await fn(env, body), 200, request, env);
         }
         if (url.pathname === '/api/brief') {
@@ -215,6 +216,7 @@ async function status(env) {
     notion: !!(env.NOTION_TOKEN && env.NOTION_TASKS_DB),
     meetingsDb: !!env.NOTION_MEETINGS_DB,
     restaurantsDb: !!env.NOTION_RESTAURANTS_DB,
+    visitsDb: !!env.NOTION_VISITS_DB,
     crypto: !!env.CMC_API_KEY,
   };
 }
@@ -900,6 +902,55 @@ async function restaurantShare(env, b) {
   if (same) return { restaurant: same, existing: true, resolved };
   const notes = [address, link].filter(Boolean).join('\n').slice(0, 1900);
   return { ...(await restaurantAdd(env, { name, city, wishlist: 'Want to try', why: 'Shared from Google Maps', notes })), existing: false, resolved };
+}
+
+// Visit log: one row per visit in the Mesa Visits database, linked to the restaurant. The restaurant's Visits count and Last visit are recomputed after every change.
+function visitsDb(env) {
+  if (!env.NOTION_VISITS_DB) throw fail('The visit log is not set up on the Worker yet (NOTION_VISITS_DB).', 409, true);
+  return env.NOTION_VISITS_DB;
+}
+export function mapVisit(p) {
+  const pr = p.properties || {}, text = a => (a || []).map(t => t.plain_text).join('').trim();
+  return { id: p.id, restaurantId: pr.Restaurant?.relation?.[0]?.id || '', date: pr.Date?.date?.start || '', ate: text(pr['What we ate']?.rich_text), rating: typeof pr.Rating?.number === 'number' ? pr.Rating.number : null, notes: text(pr.Notes?.rich_text) };
+}
+async function visitsFor(env, restaurantId) {
+  const db = visitsDb(env), out = [];
+  let cursor;
+  do {
+    const r = await notion(env, `databases/${db}/query`, 'POST', { page_size: 100, ...(restaurantId ? { filter: { property: 'Restaurant', relation: { contains: restaurantId } } } : {}), ...(cursor ? { start_cursor: cursor } : {}) });
+    out.push(...(r.results || []).map(mapVisit));
+    cursor = r.has_more ? r.next_cursor : null;
+  } while (cursor && out.length < 2000);
+  return out;
+}
+async function visitList(env) { return { visits: (await visitsFor(env)).sort((a, b) => b.date.localeCompare(a.date)) }; }
+async function syncRestaurantVisits(env, restaurantId) {
+  const v = await visitsFor(env, restaurantId), last = v.map(x => x.date).filter(Boolean).sort().at(-1) || null;
+  const properties = { Visits: { number: v.length }, 'Last visit': { date: last ? { start: last } : null } };
+  if (v.length) properties.Wishlist = { select: null };
+  return mapRestaurant(await notion(env, `pages/${restaurantId}`, 'PATCH', { properties }));
+}
+async function visitAdd(env, b) {
+  const db = visitsDb(env), bad = m => { throw fail(m, 400, true); };
+  if (!isPageId(b.restaurantId)) bad('Need a restaurant id.');
+  if (!isDate(b.date)) bad('Pick the date of the visit.');
+  const rating = b.rating === null || b.rating === undefined || b.rating === '' ? null : Number(b.rating);
+  if (rating !== null && (!Number.isInteger(rating) || rating < 1 || rating > 10)) bad('The score is a whole number from 1 to 10.');
+  const properties = {
+    Visit: { title: [{ text: { content: `${String(b.name || 'Visit').slice(0, 100)} · ${b.date}` } }] },
+    Restaurant: { relation: [{ id: b.restaurantId }] }, Date: { date: { start: b.date } },
+    'What we ate': rtext(b.ate), Rating: { number: rating }, Notes: rtext(b.notes),
+  };
+  let page;
+  try { page = await notion(env, 'pages', 'POST', { parent: { database_id: db }, properties }); } catch (e) { throw restaurantHint(e); }
+  return { visit: mapVisit(page), restaurant: await syncRestaurantVisits(env, b.restaurantId) };
+}
+async function visitDelete(env, b) {
+  visitsDb(env);
+  if (!isPageId(b.id)) throw fail('Need a visit id.', 400, true);
+  const rid = mapVisit(await notion(env, `pages/${b.id}`)).restaurantId;
+  await notion(env, `pages/${b.id}`, 'PATCH', { archived: true });
+  return { restaurant: rid ? await syncRestaurantVisits(env, rid) : null };
 }
 
 /* ---------------- CoinMarketCap prices (read only) ---------------- */

@@ -10,6 +10,7 @@ NOTION_TASKS_DB = "2e2e528f-adf8-8195-bced-f39c537ae294"
 NOTION_PEOPLE_DB = "1af97b4b-1373-4867-b105-b6afc71ff37f"
 NOTION_MEETINGS_DB = "6311b063-37a4-468b-b661-111f32c063b2"
 NOTION_RESTAURANTS_DB = "f5ce7d95-2e83-46f0-a0f4-3e7e441f632f"
+NOTION_VISITS_DB = "54f5007a-41c1-463d-9fe3-1f4939d31fa6"
 # SCOPES = "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly ..."   # only if Google rejects the defaults
 
 # Create with:  npx wrangler kv namespace create TOKENS   then paste the id here
