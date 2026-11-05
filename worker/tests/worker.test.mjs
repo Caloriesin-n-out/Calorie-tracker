@@ -1,5 +1,5 @@
 // Run with: npm test (from the worker folder). Google, Gmail and Notion are simulated; nothing leaves the machine.
-import worker, { htmlToText, buildEvent, parseFrom, decodeEntities, cleanBody, bodyOf, b64url, mapRestaurant, restaurantProps, guessCity, placeFromMapsUrl, mapVisit } from '../worker.js';
+import worker, { htmlToText, buildEvent, parseFrom, decodeEntities, cleanBody, bodyOf, b64url, mapRestaurant, restaurantProps, guessCity, placeFromMapsUrl, mapVisit, parseBooking, zonedToUtc } from '../worker.js';
 import assert from 'node:assert/strict';
 
 const store = new Map([['refreshToken', 'HEALTH_RT'], ['refreshToken:calendar', 'CAL_RT']]);
@@ -23,8 +23,21 @@ const restaurant = (id, name, over = {}) => ({ id, url: 'https://notion.so/' + i
 const msg = (id, thread, from, subject, labels, ms) => ({ id, threadId: thread, labelIds: labels, snippet: 'Hi &#39;there&#39; &amp; co', internalDate: String(ms), payload: { headers: [{ name: 'From', value: from }, { name: 'To', value: 'me@x.com' }, { name: 'Subject', value: subject }] } });
 
 const visitPage = (id, d, r) => ({ id, properties: { Visit: { title: [{ plain_text: 'Far Nomo' }] }, Restaurant: { relation: [{ id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }] }, Date: { date: { start: d } }, 'What we ate': { rich_text: [{ plain_text: 'Gyoza' }] }, Rating: { number: r }, Notes: { rich_text: [] } } });
+const BK = [
+  ['bk0000000001', '2036-12-01T10:00:00Z', 'Reserva confirmada en Filandón', 'Filandón <noreply@covermanager.com>', 'Filandón le informa: Su reserva para 2 personas a nombre de MATTHIAS HOMAN ha sido confirmada para el día 19/12/2036 a las 14:00h.'],
+  ['bk0000000002', '2036-12-01T10:05:00Z', 'Confirmation of your reservation on Sat, 12 Dec.', 'Clara Begur <noreply@myrestoo.net>', 'Saturday, 12 December 2036 / 2 People Your reservation is confirmed. Saturday, 12 December 2036 | 21:30h | 2 People'],
+  ['bk0000000007', '2036-12-01T11:00:00Z', 'Reserva confirmada en Nomo Braganza', 'Nomo Braganza <noreply@covermanager.com>', 'Nomo Braganza le informa: Su reserva para 2 personas a nombre de Matthias Homan ha sido confirmada para el día 15/12/2036 a las 20:30h.'],
+  ['bk0000000003', '2036-12-02T09:00:00Z', 'Reserva modificada en Nomo Braganza', 'Nomo Braganza <noreply@covermanager.com>', '¡Reserva modificada! Matthias Homan 20 Diciembre 2036 | 20:30h 2 personas'],
+  ['bk0000000004', '2036-12-03T09:00:00Z', 'Reserva cancelada en Filandón', 'Filandón <noreply@covermanager.com>', 'Sentimos que no pueda asistir a su cita con Filandón para el día 19/12/2036, 14:00h y 2 personas.'],
+  ['bk0000000005', '2036-12-04T09:00:00Z', 'Reminder: the table you booked at Restaurante Mar i Vent - Parador de Aiguablava', 'TheFork <info@email.thefork.com>', 'Dear Matthias, Booking confirmed ■ Friday, December 18 at 13:00 ■ 4 people'],
+  ['bk0000000006', '2036-12-04T10:00:00Z', 'How was your experience at Clara Begur?', 'Clara Begur <noreply@myrestoo.net>', 'Thanks for your visit! Please help us to improve'],
+];
 globalThis.fetch = async (url, init = {}) => {
   url = String(url); calls.push({ url, init });
+  if (url.includes('gmail.googleapis.com') && url.includes('messages?') && decodeURIComponent(url).includes('covermanager')) return J({ messages: BK.map(x => ({ id: x[0] })) });
+  if (url.includes('gmail.googleapis.com') && /messages\/bk0000/.test(url)) { const x = BK.find(y => url.includes(y[0])); return J({ id: x[0], internalDate: String(Date.parse(x[1])), snippet: x[4].slice(0, 80), payload: { mimeType: 'text/plain', headers: [{ name: 'Subject', value: x[2] }, { name: 'From', value: x[3] }], body: { data: Buffer.from(x[4], 'utf8').toString('base64url') } } }); }
+  if (url.includes('/calendars/primary/events?') && !init.method) return J({ items: decodeURIComponent(url).includes('q=Clara') ? [{ id: 'exist1', summary: '\u{1F37D} Clara Begur' }] : [] });
+  if (url.includes('/calendars/primary/events/') && init.method === 'DELETE') return J({});
   if (url.includes('/databases/54f5007a-41c1-463d-9fe3-1f4939d31fa6/query')) return J({ results: [visitPage('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1', '2026-05-01', 8), visitPage('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb2', '2026-11-02', 9)], has_more: false });
   if (url.endsWith('/v1/pages') && init.method === 'POST' && JSON.parse(init.body).parent.database_id === '54f5007a-41c1-463d-9fe3-1f4939d31fa6') return J({ id: 'v3', properties: JSON.parse(init.body).properties });
   if (url.endsWith('/pages/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1')) return J(visitPage('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1', '2026-05-01', 8));
@@ -322,5 +335,26 @@ res = await post('/api/visits/add', { restaurantId: RID, name: 'Far Nomo', date:
 res = await post('/api/visits/delete', { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1' }); r = await res.json(); assert.equal(res.status, 200, JSON.stringify(r));
 assert.ok(calls.some(c => c.url.endsWith('/pages/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1') && c.init.method === 'PATCH' && JSON.parse(c.init.body).archived === true), 'deleting a visit archives it');
 res = await worker.fetch(new Request('https://x.test/api/visits/list', { method: 'POST', body: '{}', headers: { 'X-App-Key': 'sekret' } }), { ...env, NOTION_VISITS_DB: undefined }); assert.equal(res.status, 409);
+
+// ---- Booking emails -> calendar
+store.set('refreshToken:calendar', 'RT');
+calls.length = 0;
+res = await post('/api/bookings/scan', {}); r = await res.json();
+assert.equal(res.status, 200, JSON.stringify(r)); assert.equal(r.scanned, 7);
+const byName = n => r.bookings.filter(x => x.name.startsWith(n));
+assert.deepEqual(byName('Filand').map(x => [x.date, x.status]), [['2036-12-19', 'cancelled']], 'confirmed, then cancelled');
+assert.deepEqual(byName('Clara').map(x => [x.date, x.time, x.party, x.status, x.cal]), [['2036-12-12', '21:30', 2, 'booked', true]]);
+assert.deepEqual(byName('Nomo').map(x => [x.date, x.status]).sort(), [['2036-12-15', 'cancelled'], ['2036-12-20', 'booked']], 'a changed booking replaces the old date');
+assert.deepEqual(byName('Mar i Vent').map(x => [x.date, x.time, x.party, x.status]), [['2036-12-18', '13:00', 4, 'booked']], 'a reminder counts as a booking; the year is taken from the email date');
+const posts = calls.filter(c => c.url.includes('/calendars/primary/events?') && c.init.method === 'POST'), dels = calls.filter(c => c.init.method === 'DELETE' && c.url.includes('/calendars/primary/events/'));
+assert.equal(posts.length, 4, 'Filandón, Nomo (old), Nomo (new), Mar i Vent: Clara already had an event');
+assert.equal(dels.length, 2, 'cancelled Filandón and the replaced Nomo date');
+const bev = JSON.parse(posts.find(c => JSON.parse(c.init.body).summary.includes('Filand')).init.body);
+assert.equal(bev.start.dateTime, '2036-12-19T13:00:00.000Z', 'Madrid winter time is UTC+1'); assert.equal(bev.start.timeZone, 'Europe/Madrid');
+calls.length = 0; res = await post('/api/bookings/scan', {}); r = await res.json(); assert.equal(r.scanned, 0, 'emails already handled are not read again'); assert.ok(!calls.some(c => c.init.method === 'POST' && c.url.includes('/events')), 'no duplicate events');
+assert.deepEqual(parseBooking('&iexcl;Reserva confirmada! Matthias Homan 19 Octubre 2026 |&nbsp; 13:30h 2 personas Gracias por reservar', 'Reserva confirmada en Ronda 14 - Restaurante Nikkei en Madrid', 'Ronda 14 - Restaurante Nikkei en Madrid', Date.parse('2026-10-13')), { kind: 'confirmed', name: 'Ronda 14 - Restaurante Nikkei en Madrid', date: '2026-10-19', time: '13:30', party: 2 }, 'CoverManager layout with HTML entities');
+assert.deepEqual(parseBooking(' La reserva est\u00e1 confirmada. jueves, 27 agosto 2026 / 2 Personas | [](https://u801.ct.sendgrid.net/ls/click?upn=u001.a1h30Zx5h45-2BY) | La reserva est\u00e1 confirmada. jueves, 27 agosto 2026 | 21:45h | 2 Personas Zona Interior', 'Confirmaci\u00f3n de reserva del jue., 27 ago.', 'Can Climent Platillos', Date.parse('2026-08-14')), { kind: 'confirmed', name: 'Can Climent Platillos', date: '2026-08-27', time: '21:45', party: 2 }, 'Myrestoo layout: tracking links and a first date without a time');
+assert.equal(zonedToUtc('2036-07-19', '21:30', 'Europe/Madrid').toISOString(), '2036-07-19T19:30:00.000Z');
+assert.equal(parseBooking('x', 'Newsletter', 'Clara', Date.now()), null); assert.equal(parseBooking('Booking 5 People', 'Booking confirmed at Zed', 'TheFork', Date.now()), null, 'no date or time means nothing to add');
 
 console.log('worker tests passed');

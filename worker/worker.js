@@ -22,6 +22,7 @@
 //   POST /api/meetings/new -> create a meeting note in your Notion Meetings database
 //   POST /api/restaurants/list | update | add | archive -> favourites and wishlist places (Mesa app; wishlist = places not visited yet)
 //   POST /api/visits/list | add | delete -> the visit log (Mesa Visits database): date, what you ate, score; keeps each restaurant's Visits and Last visit up to date
+//   POST /api/bookings/scan -> {days?}, reads booking emails (CoverManager, Myrestoo, TheFork) and adds, moves or removes the calendar events
 //   POST /api/restaurants/share -> {text, url}, add a place shared from Google Maps to the wishlist (skips places already listed)
 //   POST /api/crypto/search -> {symbols:[...]}, CoinMarketCap coins for those tickers (best rank first)
 //   POST /api/crypto/quotes -> {ids:[...]}, latest USD price and 24h change from CoinMarketCap (cached 60 s)
@@ -63,11 +64,11 @@ export default {
         if (url.pathname === '/api/calendar') return json(await calendar(env, url), 200, request, env);
         if (url.pathname === '/api/tasks') return json(await tasks(env, url), 200, request, env);
         if (url.pathname === '/api/mail/inbox') return json(await mailInbox(env), 200, request, env);
-        if (['/api/mail/threads', '/api/mail/message', '/api/calendar/add', '/api/meetings/new', '/api/crypto/search', '/api/crypto/quotes', '/api/restaurants/list', '/api/restaurants/update', '/api/restaurants/add', '/api/restaurants/archive', '/api/restaurants/share', '/api/visits/list', '/api/visits/add', '/api/visits/delete'].includes(url.pathname)) {
+        if (['/api/mail/threads', '/api/mail/message', '/api/calendar/add', '/api/meetings/new', '/api/crypto/search', '/api/crypto/quotes', '/api/restaurants/list', '/api/restaurants/update', '/api/restaurants/add', '/api/restaurants/archive', '/api/restaurants/share', '/api/visits/list', '/api/visits/add', '/api/visits/delete', '/api/bookings/scan'].includes(url.pathname)) {
           if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405, request, env);
           const body = await request.json().catch(() => ({}));
           const fn = { '/api/mail/threads': mailThreads, '/api/mail/message': mailMessage, '/api/calendar/add': calendarAdd, '/api/meetings/new': newMeeting, '/api/crypto/search': cryptoSearch, '/api/crypto/quotes': cryptoQuotes,
-            '/api/restaurants/list': restaurantList, '/api/restaurants/update': restaurantUpdate, '/api/restaurants/add': restaurantAdd, '/api/restaurants/archive': restaurantArchive, '/api/restaurants/share': restaurantShare, '/api/visits/list': visitList, '/api/visits/add': visitAdd, '/api/visits/delete': visitDelete }[url.pathname];
+            '/api/restaurants/list': restaurantList, '/api/restaurants/update': restaurantUpdate, '/api/restaurants/add': restaurantAdd, '/api/restaurants/archive': restaurantArchive, '/api/restaurants/share': restaurantShare, '/api/visits/list': visitList, '/api/visits/add': visitAdd, '/api/visits/delete': visitDelete, '/api/bookings/scan': bookingsScan }[url.pathname];
           return json(await fn(env, body), 200, request, env);
         }
         if (url.pathname === '/api/brief') {
@@ -951,6 +952,98 @@ async function visitDelete(env, b) {
   const rid = mapVisit(await notion(env, `pages/${b.id}`)).restaurantId;
   await notion(env, `pages/${b.id}`, 'PATCH', { archived: true });
   return { restaurant: rid ? await syncRestaurantVisits(env, rid) : null };
+}
+
+/* ---------------- Booking emails -> calendar (Mesa) ---------------- */
+
+// Confirmation, change and cancellation emails from the booking engines are read (never changed) and turned into calendar events.
+const MONTHS = { ene: 1, enero: 1, jan: 1, january: 1, gener: 1, feb: 2, febrero: 2, february: 2, febrer: 2, mar: 3, marzo: 3, march: 3, 'març': 3, marc: 3, abr: 4, abril: 4, apr: 4, april: 4, may: 5, mayo: 5, maig: 5, jun: 6, junio: 6, june: 6, juny: 6, jul: 7, julio: 7, july: 7, juliol: 7, ago: 8, agosto: 8, aug: 8, august: 8, agost: 8, sep: 9, sept: 9, septiembre: 9, september: 9, setembre: 9, oct: 10, octubre: 10, october: 10, nov: 11, noviembre: 11, november: 11, novembre: 11, dic: 12, diciembre: 12, dec: 12, december: 12, desembre: 12 };
+const pad2 = n => String(n).padStart(2, '0');
+function ymdOk(y, m, d) { const t = new Date(Date.UTC(y, m - 1, d)); return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d; }
+export function parseBooking(text, subject, fromName, sentAt) {
+  const sub = String(subject || ''), body = String(text || '').replace(/&nbsp;/gi, ' ').replace(/\(?https?:\/\/[^\s)]+\)?/g, ' ').replace(/\s+/g, ' ');
+  if (/experien|survey|encuesta|enquesta|thought about|valor|review|opinión|opinion|gracias por tu visita|thanks for your visit/i.test(sub)) return null;
+  const kind = /cancel/i.test(sub) ? 'cancelled' : /modificad|modified|changed|modificat/i.test(sub) ? 'modified' : /confirm|recordatorio|reminder|recordatori|reconfirm|booked/i.test(sub) ? 'confirmed' : null;
+  if (!kind) return null;
+  const sent = sentAt ? new Date(sentAt) : new Date();
+  const yearFor = (mo, d) => { let y = sent.getUTCFullYear(); if (Date.UTC(y, mo - 1, d) < sent.getTime() - 60 * 86400e3) y++; return y; };
+  const cands = [];
+  for (const m of body.matchAll(/(\d{1,2})\/(\d{1,2})\/(\d{4})/g)) if (ymdOk(+m[3], +m[2], +m[1])) cands.push({ date: `${m[3]}-${pad2(m[2])}-${pad2(m[1])}`, end: m.index + m[0].length });
+  for (const m of body.matchAll(/(\d{1,2})(?:\s+de)?\s+([A-Za-zçÇ]+)\.?(?:\s+de)?\s+(\d{4})/g)) { const mo = MONTHS[m[2].toLowerCase()]; if (mo && ymdOk(+m[3], mo, +m[1])) cands.push({ date: `${m[3]}-${pad2(mo)}-${pad2(m[1])}`, end: m.index + m[0].length }); }
+  for (const m of body.matchAll(/([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?(?=\s+(?:at|@|a las)\b)/gi)) { const mo = MONTHS[m[1].toLowerCase()]; if (!mo) continue; const y = m[3] ? +m[3] : yearFor(mo, +m[2]); if (ymdOk(y, mo, +m[2])) cands.push({ date: `${y}-${pad2(mo)}-${pad2(m[2])}`, end: m.index + m[0].length }); }
+  cands.sort((a, b) => a.end - b.end);
+  // The time sits right after the date ("21:45h", "a las 14:00h", "at 13:00"); the first date with a time next to it is the booking.
+  let date = '', time = '';
+  for (const c of cands) { const t = /^[^0-9]{0,14}([01]?\d|2[0-3])[:.h]([0-5]\d)\s*h?\b/.exec(body.slice(c.end, c.end + 30)); if (t) { date = c.date; time = `${pad2(t[1])}:${t[2]}`; break; } }
+  if (!date) return null;
+  const pm = /(\d{1,2})\s*(?:personas?|people|persons?|persones|pax|comensales|guests?|gente)\b/i.exec(body), party = pm ? +pm[1] : 0;
+  let name = '';
+  const sm = /\b(?:en|at|in|a)\s+(.+?)\s*$/i.exec(sub.replace(/\s*(?:on|del|from)\s+\w+\.?,?\s*\d.*$/i, ''));
+  name = (fromName && !/thefork|covermanager|myrestoo/i.test(fromName) ? fromName : '') || (sm ? sm[1] : '');
+  name = name.replace(/^restaurante?\s+/i, '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (!name) return null;
+  return { kind, name, date, time, party };
+}
+export function zonedToUtc(date, time, tz) {
+  const [y, mo, d] = date.split('-').map(Number), [hh, mm] = time.split(':').map(Number), guess = Date.UTC(y, mo - 1, d, hh, mm);
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(guess)).map(p => [p.type, p.value]));
+  return new Date(guess - (Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute) - guess));
+}
+const slug = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const BOOKING_SENDERS = 'noreply@covermanager.com OR noreply@myrestoo.net OR info@email.thefork.com OR noreply@thefork.com OR no-reply@thefork.com';
+
+async function bookingsScan(env, b) {
+  const days = Math.max(1, Math.min(120, Math.floor(Number(b.days)) || 45));
+  const tzOf = /^[A-Za-z][A-Za-z0-9_+\-]*(\/[A-Za-z0-9_+\-]+){0,2}$/.test(b.timeZone || '') ? b.timeZone : 'Europe/Madrid';
+  const q = `from:(${BOOKING_SENDERS}) newer_than:${days}d`;
+  const list = await ggmail(env, `users/me/messages?${new URLSearchParams({ q, maxResults: '60' })}`);
+  const fresh = [];
+  for (const m of list.messages || []) if (!(await env.TOKENS.get('bookingmsg:' + m.id))) fresh.push(m.id);
+  const full = [];
+  for (const id of fresh) {
+    const m = await ggmail(env, `users/me/messages/${encodeURIComponent(id)}?format=full`);
+    const hdr = n => (m.payload?.headers || []).find(h => h.name.toLowerCase() === n)?.value || '';
+    full.push({ id, at: Number(m.internalDate) || 0, subject: decodeEntities(hdr('subject')), from: parseFrom(hdr('from')), text: bodyOf(m.payload).text || decodeEntities(m.snippet || '') });
+  }
+  full.sort((x, y) => x.at - y.at);
+  const out = [], seen = new Set();
+  for (const m of full) {
+    const p = parseBooking(m.text, m.subject, m.from.name, m.at);
+    await env.TOKENS.put('bookingmsg:' + m.id, '1', { expirationTtl: 150 * 86400 });
+    if (!p) continue;
+    const key = `${slug(p.name)}|${p.date}|${p.time}`, stored = await env.TOKENS.get('booking:' + key, 'json');
+    if (p.kind === 'cancelled') {
+      if (stored?.eventId) { try { await gcal(env, `calendars/primary/events/${encodeURIComponent(stored.eventId)}`, { method: 'DELETE' }); } catch { /* already gone */ } }
+      await env.TOKENS.put('booking:' + key, JSON.stringify({ cancelled: true }), { expirationTtl: 400 * 86400 });
+      out.push({ key, ...p, status: 'cancelled', cal: false }); continue;
+    }
+    if (stored && !stored.cancelled) { out.push({ key, ...p, status: 'booked', cal: !!stored.eventId }); continue; }
+    if (p.kind === 'modified') {
+      const idx = (await env.TOKENS.get('bookingidx:' + slug(p.name), 'json')) || [];
+      for (const k of idx) if (k !== key) {
+        const old = await env.TOKENS.get('booking:' + k, 'json');
+        if (old?.eventId && k.split('|')[1] >= new Date().toISOString().slice(0, 10)) { try { await gcal(env, `calendars/primary/events/${encodeURIComponent(old.eventId)}`, { method: 'DELETE' }); } catch { /* ignore */ } }
+        await env.TOKENS.put('booking:' + k, JSON.stringify({ cancelled: true }), { expirationTtl: 400 * 86400 });
+        out.push({ key: k, name: p.name, date: k.split('|')[1], time: k.split('|')[2], party: p.party, status: 'cancelled', cal: false });
+      }
+    }
+    const start = zonedToUtc(p.date, p.time, tzOf), end = new Date(+start + 2 * 3600e3);
+    let eventId = '';
+    try {
+      const day = await gcal(env, `calendars/primary/events?${new URLSearchParams({ timeMin: new Date(+start - 3 * 3600e3).toISOString(), timeMax: new Date(+start + 5 * 3600e3).toISOString(), q: p.name.split(/[ -]/)[0], singleEvents: 'true', maxResults: '10' })}`);
+      eventId = (day.items || []).find(e => plain(e.summary).includes(plain(p.name.split(/[ -]/)[0])))?.id || '';
+    } catch { /* fall through and create */ }
+    if (!eventId) {
+      const { body, query } = buildEvent({ title: `🍽 ${p.name}`, start: start.toISOString(), end: end.toISOString(), timeZone: tzOf, location: p.name, description: [p.party ? `Table for ${p.party}.` : '', 'Added by Mesa from your booking email.'].filter(Boolean).join('\n') });
+      eventId = (await gcal(env, `calendars/primary/events?${query}`, { method: 'POST', body: JSON.stringify(body) })).id || '';
+    }
+    await env.TOKENS.put('booking:' + key, JSON.stringify({ eventId }), { expirationTtl: 400 * 86400 });
+    const idx = (await env.TOKENS.get('bookingidx:' + slug(p.name), 'json')) || [];
+    if (!idx.includes(key)) await env.TOKENS.put('bookingidx:' + slug(p.name), JSON.stringify([...idx, key].slice(-10)), { expirationTtl: 400 * 86400 });
+    out.push({ key, ...p, status: 'booked', cal: !!eventId });
+  }
+  const latest = new Map(); for (const x of out) latest.set(x.key, x);
+  return { bookings: [...latest.values()], scanned: full.length };
 }
 
 /* ---------------- CoinMarketCap prices (read only) ---------------- */
