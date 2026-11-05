@@ -886,8 +886,18 @@ async function restaurantShare(env, b) {
   restaurantDb(env);
   const text = String(b.text || '').slice(0, 2000), given = String(b.url || '').slice(0, 500);
   const link = (given.match(MAPS_URL) || text.match(MAPS_URL) || [''])[0];
-  const lines = text.replace(MAPS_URL, ' ').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  const rest = text.replace(MAPS_URL, ' ');
+  // A restaurant's own website (shared from the browser) is kept as its Website; its page title gives the name if none came with it.
+  const site = (rest.match(/https?:\/\/[^\s<>"]+/i) || [given && !MAPS_URL.test(given) && isHttp(given) ? given : ''])[0].slice(0, 500);
+  const lines = rest.replace(/https?:\/\/[^\s<>"]+/gi, ' ').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
   let name = lines[0] || '', address = lines.slice(1).join(', ');
+  if (!name && site && !link) {
+    try {
+      const res = await fetch(site, { redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15' }, signal: AbortSignal.timeout(6000) });
+      const t = (await res.text()).match(/<title[^>]*>([^<]{2,200})<\/title>/i);
+      if (t) name = decodeEntities(t[1]).split(/\s[|\u2013\u2014-]\s|\s\u00b7\s/)[0].replace(/^(restaurante?|bienvenid[oa]s? a)\s+/i, '').trim();
+    } catch { /* no name from the site */ }
+  }
   if (link && (!name || !address)) {
     try {
       const res = await fetch(link, { redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15', 'Accept-Language': 'en', Cookie: 'CONSENT=YES+' }, signal: AbortSignal.timeout(6000) });
@@ -902,7 +912,7 @@ async function restaurantShare(env, b) {
   const same = (await restaurantList(env)).restaurants.find(r => plain(r.name) === plain(name));
   if (same) return { restaurant: same, existing: true, resolved };
   const notes = [address, link].filter(Boolean).join('\n').slice(0, 1900);
-  return { ...(await restaurantAdd(env, { name, city, wishlist: 'Want to try', why: 'Shared from Google Maps', notes })), existing: false, resolved };
+  return { ...(await restaurantAdd(env, { name, city, wishlist: 'Want to try', why: 'Shared from Google Maps', notes, ...(site && isHttp(site) ? { website: site } : {}) })), existing: false, resolved };
 }
 
 // Visit log: one row per visit in the Mesa Visits database, linked to the restaurant. The restaurant's Visits count and Last visit are recomputed after every change.

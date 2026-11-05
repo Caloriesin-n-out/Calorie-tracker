@@ -41,6 +41,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (url.includes('/databases/54f5007a-41c1-463d-9fe3-1f4939d31fa6/query')) return J({ results: [visitPage('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1', '2026-05-01', 8), visitPage('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb2', '2026-11-02', 9)], has_more: false });
   if (url.endsWith('/v1/pages') && init.method === 'POST' && JSON.parse(init.body).parent.database_id === '54f5007a-41c1-463d-9fe3-1f4939d31fa6') return J({ id: 'v3', properties: JSON.parse(init.body).properties });
   if (url.endsWith('/pages/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1')) return J(visitPage('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1', '2026-05-01', 8));
+  if (url.includes('casaorellana.example')) return new Response('<html><head><title>Restaurante Casa Orellana | Tapas en Madrid</title></head></html>');
   if (url.includes('g.co/kgs')) { const r = new Response('<title>x</title>'); Object.defineProperty(r, 'url', { value: 'https://www.google.com/search?q=Casa+Orellana+Madrid&kgmid=%2Fg%2F11abc' }); return r; }
   if (url.includes('maps.app.goo.gl')) { const r = new Response('<title>x</title>'); Object.defineProperty(r, 'url', { value: 'https://www.google.com/maps/place/Casa+Juli%C3%A1n+de+Tolosa,+C.+de+la+Cava+Baja,+18,+28005+Madrid/@40.41,-3.71,17z/data=!4m6' }); return r; }
   const dec = decodeURIComponent(url.replace(/\+/g, ' ')), body = init.body && typeof init.body === 'string' && init.body.startsWith('{') ? JSON.parse(init.body) : null;
@@ -322,6 +323,10 @@ res = await post('/api/restaurants/share', { text: 'Casa Orellana Madrid\nhttps:
 assert.equal(res.status, 200, JSON.stringify(r)); assert.equal(r.resolved.city, 'Madrid'); assert.match(JSON.parse(calls.filter(c => c.url.endsWith('/v1/pages')).at(-1).init.body).properties.Notes.rich_text[0].text.content, /google\.com\/search/, 'a Google search link is kept in the notes');
 res = await post('/api/restaurants/share', { url: 'https://g.co/kgs/AbCdEf' }); r = await res.json();
 assert.equal(res.status, 200, JSON.stringify(r)); assert.equal(r.resolved.name, 'Casa Orellana Madrid', 'a Google knowledge-panel short link is followed to the search it points at');
+res = await post('/api/restaurants/share', { text: 'https://casaorellana.example/' }); r = await res.json();
+assert.equal(res.status, 200, JSON.stringify(r)); assert.equal(r.resolved.name, 'Casa Orellana', 'a restaurant website gives the name from its page title');
+assert.equal(JSON.parse(calls.filter(c => c.url.endsWith('/v1/pages')).at(-1).init.body).properties.Website.url, 'https://casaorellana.example/');
+res = await post('/api/restaurants/share', { text: 'Tragamar' }); r = await res.json(); assert.equal(res.status, 200, 'just a name is enough'); assert.equal(r.resolved.name, 'Tragamar');
 assert.equal((await post('/api/restaurants/share', {})).status, 400);
 assert.equal(guessCity('Carrer Major 1, 17255 Begur'), 'Costa Brava'); assert.equal(guessCity('Walfischgasse 5, 1010 Wien'), 'Vienna'); assert.equal(guessCity('Rua Augusta, Lisboa'), '');
 assert.deepEqual(placeFromMapsUrl('https://consent.google.com/m?continue=' + encodeURIComponent('https://www.google.com/maps/place/Gresca,+Barcelona/@41,2')), { name: 'Gresca', address: 'Barcelona' });
