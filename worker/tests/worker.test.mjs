@@ -1,5 +1,5 @@
 // Run with: npm test (from the worker folder). Google, Gmail and Notion are simulated; nothing leaves the machine.
-import worker, { htmlToText, buildEvent, parseFrom, decodeEntities, cleanBody, bodyOf, b64url, mapRestaurant, restaurantProps } from '../worker.js';
+import worker, { htmlToText, buildEvent, parseFrom, decodeEntities, cleanBody, bodyOf, b64url, mapRestaurant, restaurantProps, guessCity, placeFromMapsUrl } from '../worker.js';
 import assert from 'node:assert/strict';
 
 const store = new Map([['refreshToken', 'HEALTH_RT'], ['refreshToken:calendar', 'CAL_RT']]);
@@ -24,6 +24,7 @@ const msg = (id, thread, from, subject, labels, ms) => ({ id, threadId: thread, 
 
 globalThis.fetch = async (url, init = {}) => {
   url = String(url); calls.push({ url, init });
+  if (url.includes('maps.app.goo.gl')) { const r = new Response('<title>x</title>'); Object.defineProperty(r, 'url', { value: 'https://www.google.com/maps/place/Casa+Juli%C3%A1n+de+Tolosa,+C.+de+la+Cava+Baja,+18,+28005+Madrid/@40.41,-3.71,17z/data=!4m6' }); return r; }
   const dec = decodeURIComponent(url.replace(/\+/g, ' ')), body = init.body && typeof init.body === 'string' && init.body.startsWith('{') ? JSON.parse(init.body) : null;
   if (url.includes('oauth2.googleapis.com/token')) { tokenCalls.push(String(init.body)); return J({ access_token: 'AT', expires_in: 3599 }); }
   // Google Health
@@ -288,5 +289,19 @@ assert.deepEqual(JSON.parse(calls.filter(c => c.url.includes('/pages/' + RID)).a
 await post('/api/restaurants/archive', { id: RID, archived: false }); assert.deepEqual(JSON.parse(calls.filter(c => c.url.includes('/pages/' + RID)).at(-1).init.body), { archived: false }, 'undo restores');
 assert.equal((await post('/api/restaurants/archive', { id: 'nope' })).status, 400);
 assert.equal((await req('/api/restaurants/archive')).status, 405, 'POST only');
+
+// ---- Share from Google Maps -> wishlist
+res = await post('/api/restaurants/share', { text: 'Casa Orellana\nCalle Orellana, 6, 28004 Madrid\nhttps://maps.app.goo.gl/abc123' }); r = await res.json();
+assert.equal(res.status, 200, JSON.stringify(r)); assert.equal(r.existing, false); assert.equal(r.resolved.city, 'Madrid');
+let sp = JSON.parse(calls.filter(c => c.url.endsWith('/v1/pages')).at(-1).init.body).properties;
+assert.equal(sp.Name.title[0].text.content, 'Casa Orellana'); assert.deepEqual(sp.Wishlist, { select: { name: 'Want to try' } }); assert.match(sp.Notes.rich_text[0].text.content, /maps\.app\.goo\.gl\/abc123/);
+assert.ok(!calls.some(c => c.url.includes('maps.app.goo.gl')), 'name and address came with the share, so no lookup is needed');
+res = await post('/api/restaurants/share', { url: 'https://maps.app.goo.gl/xyz' }); r = await res.json();
+assert.equal(res.status, 200, JSON.stringify(r)); assert.equal(r.resolved.name, 'Casa Julián de Tolosa'); assert.equal(r.resolved.city, 'Madrid'); assert.match(r.resolved.address, /Cava Baja/);
+res = await post('/api/restaurants/share', { text: 'Far Nomo\nLlafranc\nhttps://maps.app.goo.gl/q' }); r = await res.json();
+assert.equal(res.status, 200); assert.equal(r.existing, true, 'a place already in the list is not added twice'); assert.equal(r.restaurant.name, 'Far Nomo');
+assert.equal((await post('/api/restaurants/share', {})).status, 400);
+assert.equal(guessCity('Carrer Major 1, 17255 Begur'), 'Costa Brava'); assert.equal(guessCity('Walfischgasse 5, 1010 Wien'), 'Vienna'); assert.equal(guessCity('Rua Augusta, Lisboa'), '');
+assert.deepEqual(placeFromMapsUrl('https://consent.google.com/m?continue=' + encodeURIComponent('https://www.google.com/maps/place/Gresca,+Barcelona/@41,2')), { name: 'Gresca', address: 'Barcelona' });
 
 console.log('worker tests passed');

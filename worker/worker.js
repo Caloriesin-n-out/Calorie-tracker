@@ -21,6 +21,7 @@
 //   POST /api/mail/message -> {id}, the readable text of one mail (read only, not stored)
 //   POST /api/meetings/new -> create a meeting note in your Notion Meetings database
 //   POST /api/restaurants/list | update | add | archive -> favourites and wishlist places (Mesa app; wishlist = places not visited yet)
+//   POST /api/restaurants/share -> {text, url}, add a place shared from Google Maps to the wishlist (skips places already listed)
 //   POST /api/crypto/search -> {symbols:[...]}, CoinMarketCap coins for those tickers (best rank first)
 //   POST /api/crypto/quotes -> {ids:[...]}, latest USD price and 24h change from CoinMarketCap (cached 60 s)
 // CoinMarketCap (optional): secret CMC_API_KEY (a free key from pro.coinmarketcap.com).
@@ -61,11 +62,11 @@ export default {
         if (url.pathname === '/api/calendar') return json(await calendar(env, url), 200, request, env);
         if (url.pathname === '/api/tasks') return json(await tasks(env, url), 200, request, env);
         if (url.pathname === '/api/mail/inbox') return json(await mailInbox(env), 200, request, env);
-        if (['/api/mail/threads', '/api/mail/message', '/api/calendar/add', '/api/meetings/new', '/api/crypto/search', '/api/crypto/quotes', '/api/restaurants/list', '/api/restaurants/update', '/api/restaurants/add', '/api/restaurants/archive'].includes(url.pathname)) {
+        if (['/api/mail/threads', '/api/mail/message', '/api/calendar/add', '/api/meetings/new', '/api/crypto/search', '/api/crypto/quotes', '/api/restaurants/list', '/api/restaurants/update', '/api/restaurants/add', '/api/restaurants/archive', '/api/restaurants/share'].includes(url.pathname)) {
           if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405, request, env);
           const body = await request.json().catch(() => ({}));
           const fn = { '/api/mail/threads': mailThreads, '/api/mail/message': mailMessage, '/api/calendar/add': calendarAdd, '/api/meetings/new': newMeeting, '/api/crypto/search': cryptoSearch, '/api/crypto/quotes': cryptoQuotes,
-            '/api/restaurants/list': restaurantList, '/api/restaurants/update': restaurantUpdate, '/api/restaurants/add': restaurantAdd, '/api/restaurants/archive': restaurantArchive }[url.pathname];
+            '/api/restaurants/list': restaurantList, '/api/restaurants/update': restaurantUpdate, '/api/restaurants/add': restaurantAdd, '/api/restaurants/archive': restaurantArchive, '/api/restaurants/share': restaurantShare }[url.pathname];
           return json(await fn(env, body), 200, request, env);
         }
         if (url.pathname === '/api/brief') {
@@ -856,6 +857,49 @@ async function restaurantArchive(env, b) {
   restaurantDb(env);
   if (!isPageId(b.id)) throw fail('Need a restaurant id.', 400, true);
   try { return { restaurant: mapRestaurant(await notion(env, `pages/${b.id}`, 'PATCH', { archived: b.archived !== false })) }; } catch (e) { throw restaurantHint(e); }
+}
+
+// Add a place that was shared from Google Maps (share sheet text and/or link) to the wishlist.
+const MAPS_URL = /https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps|(?:www\.)?google\.[a-z.]{2,6}\/maps|maps\.google\.[a-z.]{2,6})[^\s<>"]*/i;
+const COSTA_BRAVA = /\b(begur|palafrugell|pals|calella|llafranc|tamariu|girona|torroella|regenc[oó]s|platja d['’]aro|sant feliu|sa tuna|aiguablava|peratallada|l['’]escala|roses|cadaqu[eé]s|figueres|la bisbal|lloret|tossa|blanes|l['’]estartit|costa brava)\b/i;
+export function guessCity(s) {
+  if (/\bmadrid\b/i.test(s)) return 'Madrid';
+  if (/\b(wien|vienna|viena)\b/i.test(s)) return 'Vienna';
+  if (COSTA_BRAVA.test(s)) return 'Costa Brava';
+  return '';
+}
+const plain = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+export function placeFromMapsUrl(u) {
+  try {
+    let url = new URL(u);
+    if (/consent\.google\./.test(url.hostname) && url.searchParams.get('continue')) url = new URL(url.searchParams.get('continue'));
+    const m = url.pathname.match(/\/maps\/place\/([^/@]+)/);
+    const raw = m ? decodeURIComponent(m[1].replace(/\+/g, ' ')) : (url.searchParams.get('q') || url.searchParams.get('query') || '');
+    const parts = raw.split(',').map(x => x.trim()).filter(Boolean);
+    return { name: parts[0] || '', address: parts.slice(1).join(', ') };
+  } catch { return { name: '', address: '' }; }
+}
+async function restaurantShare(env, b) {
+  restaurantDb(env);
+  const text = String(b.text || '').slice(0, 2000), given = String(b.url || '').slice(0, 500);
+  const link = (given.match(MAPS_URL) || text.match(MAPS_URL) || [''])[0];
+  const lines = text.replace(MAPS_URL, ' ').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  let name = lines[0] || '', address = lines.slice(1).join(', ');
+  if (link && (!name || !address)) {
+    try {
+      const res = await fetch(link, { redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15', 'Accept-Language': 'en', Cookie: 'CONSENT=YES+' }, signal: AbortSignal.timeout(6000) });
+      const p = placeFromMapsUrl(res.url || link);
+      name = name || p.name; address = address || p.address;
+      if (!name) { const t = (await res.text()).match(/<title>([^<]{2,150})<\/title>/i); if (t) name = t[1].replace(/\s*[-–·]\s*Google\s*Maps.*$/i, '').trim(); }
+    } catch { /* fall back to what was shared */ }
+  }
+  name = name.replace(/\s+/g, ' ').slice(0, 120);
+  if (!name) throw fail('Could not read a place name from what you shared. Add it in Mesa with the + button instead.', 400, true);
+  const city = guessCity(`${address} ${name}`), resolved = { name, city, address };
+  const same = (await restaurantList(env)).restaurants.find(r => plain(r.name) === plain(name));
+  if (same) return { restaurant: same, existing: true, resolved };
+  const notes = [address, link].filter(Boolean).join('\n').slice(0, 1900);
+  return { ...(await restaurantAdd(env, { name, city, wishlist: 'Want to try', why: 'Shared from Google Maps', notes })), existing: false, resolved };
 }
 
 /* ---------------- CoinMarketCap prices (read only) ---------------- */
