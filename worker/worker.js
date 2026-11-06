@@ -774,6 +774,7 @@ const R_MEALS = ['Lunch', 'Dinner', 'Brunch'];
 const R_TAGS = ['Terrace', 'Sea view', 'Group-friendly', 'Kids welcome', 'Romantic', 'Special occasion', 'Casual', 'Fine dining', 'Vegetarian options', 'Dog-friendly', 'Quiet', 'Lively'];
 // Wishlist: a place you have not been to yet. Empty means a place you have been (a normal favourite); "I've been" simply clears it.
 const R_WISHLIST = ['Want to try', 'Booked'];
+const R_AUTO = ['Books automatically', 'Needs card', 'Captcha or block', 'Manual', 'No online booking', 'Not checked'];
 
 export function mapRestaurant(p) {
   const pr = p.properties || {}, text = a => (a || []).map(t => t.plain_text).join('').trim();
@@ -785,6 +786,7 @@ export function mapRestaurant(p) {
     card: pr['Card needed']?.select?.name || 'Unknown', policy: text(pr['Deposit / policy']?.rich_text), notes: text(pr.Notes?.rich_text),
     lastVisit: pr['Last visit']?.date?.start || null, visits: pr.Visits?.number ?? 0, rating: typeof pr['My rating']?.number === 'number' ? pr['My rating'].number : null,
     wishlist: pr.Wishlist?.select?.name || '', why: text(pr['Why / recommended by']?.rich_text), added: (p.created_time || '').slice(0, 10),
+    autoBooking: pr['Auto booking']?.select?.name || '', autoNotes: text(pr['Auto booking notes']?.rich_text),
   };
 }
 
@@ -816,6 +818,8 @@ export function restaurantProps(b, creating = false) {
   if (has('lastVisit')) { if (b.lastVisit && !isDate(b.lastVisit)) bad('Bad date.'); out['Last visit'] = { date: b.lastVisit ? { start: b.lastVisit } : null }; }
   if (has('wishlist')) { if (b.wishlist && !R_WISHLIST.includes(b.wishlist)) bad('Unknown wishlist status.'); out.Wishlist = { select: b.wishlist ? { name: b.wishlist } : null }; }
   if (has('why')) out['Why / recommended by'] = rtext(b.why);
+  if (has('autoBooking')) { if (b.autoBooking && !R_AUTO.includes(b.autoBooking)) bad('Unknown auto booking status.'); out['Auto booking'] = { select: b.autoBooking ? { name: b.autoBooking } : null }; }
+  if (has('autoNotes')) out['Auto booking notes'] = rtext(b.autoNotes);
   if (has('rating')) { const n = b.rating === null || b.rating === '' ? null : Number(b.rating); if (n !== null && (!Number.isInteger(n) || n < 1 || n > 10)) bad('Your score is a whole number from 1 to 10.'); out['My rating'] = { number: n }; }
   if (has('visits')) { const n = Number(b.visits); if (!Number.isInteger(n) || n < 0 || n > 999) bad('Visits must be a whole number.'); out.Visits = { number: n }; }
   return out;
