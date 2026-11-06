@@ -982,10 +982,11 @@ export function parseBooking(text, subject, fromName, sentAt) {
   for (const m of body.matchAll(/(\d{1,2})\/(\d{1,2})\/(\d{4})/g)) if (ymdOk(+m[3], +m[2], +m[1])) cands.push({ date: `${m[3]}-${pad2(m[2])}-${pad2(m[1])}`, end: m.index + m[0].length });
   for (const m of body.matchAll(/(\d{1,2})(?:\s+de)?\s+([A-Za-zçÇ]+)\.?(?:\s+de)?\s+(\d{4})/g)) { const mo = MONTHS[m[2].toLowerCase()]; if (mo && ymdOk(+m[3], mo, +m[1])) cands.push({ date: `${m[3]}-${pad2(mo)}-${pad2(m[1])}`, end: m.index + m[0].length }); }
   for (const m of body.matchAll(/([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?(?=\s+(?:at|@|a las)\b)/gi)) { const mo = MONTHS[m[1].toLowerCase()]; if (!mo) continue; const y = m[3] ? +m[3] : yearFor(mo, +m[2]); if (ymdOk(y, mo, +m[2])) cands.push({ date: `${y}-${pad2(mo)}-${pad2(m[2])}`, end: m.index + m[0].length }); }
+  for (const m of body.matchAll(/(?<![\d\/])(\d{1,2})\s+([A-Za-zçÇ]{3,9})\.?(?!\s+(?:de\s+)?\d{4})(?![A-Za-z])/g)) { const mo = MONTHS[m[2].toLowerCase()]; if (!mo) continue; const y = yearFor(mo, +m[1]); if (ymdOk(y, mo, +m[1])) cands.push({ date: `${y}-${pad2(mo)}-${pad2(m[1])}`, end: m.index + m[0].length }); }
   cands.sort((a, b) => a.end - b.end);
   // The time sits right after the date ("21:45h", "a las 14:00h", "at 13:00"); the first date with a time next to it is the booking.
   let date = '', time = '';
-  for (const c of cands) { const t = /^[^0-9]{0,14}([01]?\d|2[0-3])[:.h]([0-5]\d)\s*h?\b/.exec(body.slice(c.end, c.end + 30)); if (t) { date = c.date; time = `${pad2(t[1])}:${t[2]}`; break; } }
+  for (const c of cands) { const t = /^[^0-9]{0,14}([01]?\d|2[0-3])[:.h]([0-5]\d)(?:\s*([ap])\.?m\b|\s*h?\b)/i.exec(body.slice(c.end, c.end + 30)); if (t) { let hh = +t[1]; if (t[3]) { const pmFlag = t[3].toLowerCase() === 'p'; if (pmFlag && hh < 12) hh += 12; if (!pmFlag && hh === 12) hh = 0; } date = c.date; time = `${pad2(hh)}:${t[2]}`; break; } }
   if (!date) return null;
   const pm = /(\d{1,2})\s*(?:personas?|people|persons?|persones|pax|comensales|guests?|gente)\b/i.exec(body), party = pm ? +pm[1] : 0;
   let name = '';
@@ -1001,7 +1002,7 @@ export function zonedToUtc(date, time, tz) {
   return new Date(guess - (Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute) - guess));
 }
 const slug = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-const BOOKING_SENDERS = 'noreply@covermanager.com OR noreply@myrestoo.net OR info@email.thefork.com OR noreply@thefork.com OR no-reply@thefork.com';
+const BOOKING_SENDERS = 'noreply@covermanager.com OR noreply@myrestoo.net OR info@email.thefork.com OR noreply@thefork.com OR no-reply@thefork.com OR reservation@restaurant-information.com';
 
 // Rebuild the list of bookings from the emails alone: no calendar changes and nothing is marked as handled. Used when Mesa is set up on a new phone.
 async function bookingsRebuild(env, days) {
