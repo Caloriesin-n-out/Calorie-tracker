@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 const store = new Map([['refreshToken', 'HEALTH_RT'], ['refreshToken:calendar', 'CAL_RT']]);
 const TOKENS = { get: async (k, type) => { const v = store.get(k) ?? null; return type === 'json' && v ? JSON.parse(v) : v; }, put: async (k, v) => { store.set(k, v); }, delete: async k => { store.delete(k); } };
 const env = { TOKENS, ALLOWED_ORIGIN: 'https://me.github.io', APP_KEY: 'sekret', GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs',
-  NOTION_TOKEN: 'ntn_x', NOTION_TASKS_DB: '2e2e528f-adf8-8195-bced-f39c537ae294', NOTION_PEOPLE_DB: '1af97b4b-1373-4867-b105-b6afc71ff37f', NOTION_MEETINGS_DB: '6311b063-37a4-468b-b661-111f32c063b2', NOTION_VISITS_DB: '54f5007a-41c1-463d-9fe3-1f4939d31fa6', NOTION_BOOKREQ_DB: 'c513574b-9b1f-42d0-9f18-cd901d56099c', NOTION_RESTAURANTS_DB: 'f5ce7d95-2e83-46f0-a0f4-3e7e441f632f', CMC_API_KEY: 'cmc_key' };
+  NOTION_TOKEN: 'ntn_x', NOTION_TASKS_DB: '2e2e528f-adf8-8195-bced-f39c537ae294', NOTION_PEOPLE_DB: '1af97b4b-1373-4867-b105-b6afc71ff37f', NOTION_MEETINGS_DB: '6311b063-37a4-468b-b661-111f32c063b2', NOTION_VISITS_DB: '54f5007a-41c1-463d-9fe3-1f4939d31fa6', NOTION_BOOKREQ_DB: 'c513574b-9b1f-42d0-9cd1-8f901d56099c', NOTION_RESTAURANTS_DB: 'f5ce7d95-2e83-46f0-a0f4-3e7e441f632f', CMC_API_KEY: 'cmc_key' };
 let calls = [], calMode = 'ok', notionMode = 'ok', tokenCalls = [], cmcMode = 'ok', cmcCalls = 0;
 const J = (b, s = 200) => new Response(JSON.stringify(b), { status: s });
 const PID = '2e2e528f-adf8-8195-bced-f39c537ae294';
@@ -32,7 +32,7 @@ const BK = [
   ['bk0000000005', '2036-12-04T09:00:00Z', 'Reminder: the table you booked at Restaurante Mar i Vent - Parador de Aiguablava', 'TheFork <info@email.thefork.com>', 'Dear Matthias, Booking confirmed ■ Friday, December 18 at 13:00 ■ 4 people'],
   ['bk0000000006', '2036-12-04T10:00:00Z', 'How was your experience at Clara Begur?', 'Clara Begur <noreply@myrestoo.net>', 'Thanks for your visit! Please help us to improve'],
 ];
-const BR = 'c513574b-9b1f-42d0-9f18-cd901d56099c', brStore = [];
+const BR = 'c513574b-9b1f-42d0-9cd1-8f901d56099c', brStore = [];
 const D1 = 'dddddddd-dddd-dddd-dddd-ddddddddddd1', D2 = 'dddddddd-dddd-dddd-dddd-ddddddddddd2', D3 = 'dddddddd-dddd-dddd-dddd-ddddddddddd3';
 const plainify = pr => Object.fromEntries(Object.entries(pr).map(([k, v]) => [k, v.rich_text ? { rich_text: v.rich_text.map(t => ({ plain_text: t.text.content })) } : v.title ? { title: v.title.map(t => ({ plain_text: t.text.content })) } : v]));
 globalThis.fetch = async (url, init = {}) => {
