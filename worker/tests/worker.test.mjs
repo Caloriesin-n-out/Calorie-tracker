@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 const store = new Map([['refreshToken', 'HEALTH_RT'], ['refreshToken:calendar', 'CAL_RT']]);
 const TOKENS = { get: async (k, type) => { const v = store.get(k) ?? null; return type === 'json' && v ? JSON.parse(v) : v; }, put: async (k, v) => { store.set(k, v); }, delete: async k => { store.delete(k); } };
 const env = { TOKENS, ALLOWED_ORIGIN: 'https://me.github.io', APP_KEY: 'sekret', GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs',
-  NOTION_TOKEN: 'ntn_x', NOTION_TASKS_DB: '2e2e528f-adf8-8195-bced-f39c537ae294', NOTION_PEOPLE_DB: '1af97b4b-1373-4867-b105-b6afc71ff37f', NOTION_MEETINGS_DB: '6311b063-37a4-468b-b661-111f32c063b2', NOTION_VISITS_DB: '54f5007a-41c1-463d-9fe3-1f4939d31fa6', NOTION_RESTAURANTS_DB: 'f5ce7d95-2e83-46f0-a0f4-3e7e441f632f', CMC_API_KEY: 'cmc_key' };
+  NOTION_TOKEN: 'ntn_x', NOTION_TASKS_DB: '2e2e528f-adf8-8195-bced-f39c537ae294', NOTION_PEOPLE_DB: '1af97b4b-1373-4867-b105-b6afc71ff37f', NOTION_MEETINGS_DB: '6311b063-37a4-468b-b661-111f32c063b2', NOTION_VISITS_DB: '54f5007a-41c1-463d-9fe3-1f4939d31fa6', NOTION_BOOKREQ_DB: 'c513574b-9b1f-42d0-9f18-cd901d56099c', NOTION_RESTAURANTS_DB: 'f5ce7d95-2e83-46f0-a0f4-3e7e441f632f', CMC_API_KEY: 'cmc_key' };
 let calls = [], calMode = 'ok', notionMode = 'ok', tokenCalls = [], cmcMode = 'ok', cmcCalls = 0;
 const J = (b, s = 200) => new Response(JSON.stringify(b), { status: s });
 const PID = '2e2e528f-adf8-8195-bced-f39c537ae294';
@@ -32,8 +32,21 @@ const BK = [
   ['bk0000000005', '2036-12-04T09:00:00Z', 'Reminder: the table you booked at Restaurante Mar i Vent - Parador de Aiguablava', 'TheFork <info@email.thefork.com>', 'Dear Matthias, Booking confirmed ■ Friday, December 18 at 13:00 ■ 4 people'],
   ['bk0000000006', '2036-12-04T10:00:00Z', 'How was your experience at Clara Begur?', 'Clara Begur <noreply@myrestoo.net>', 'Thanks for your visit! Please help us to improve'],
 ];
+const BR = 'c513574b-9b1f-42d0-9f18-cd901d56099c', brStore = [];
+const D1 = 'dddddddd-dddd-dddd-dddd-ddddddddddd1', D2 = 'dddddddd-dddd-dddd-dddd-ddddddddddd2', D3 = 'dddddddd-dddd-dddd-dddd-ddddddddddd3';
+const plainify = pr => Object.fromEntries(Object.entries(pr).map(([k, v]) => [k, v.rich_text ? { rich_text: v.rich_text.map(t => ({ plain_text: t.text.content })) } : v.title ? { title: v.title.map(t => ({ plain_text: t.text.content })) } : v]));
 globalThis.fetch = async (url, init = {}) => {
   url = String(url); calls.push({ url, init });
+  if (url.includes('api.notion.com')) {
+    const bd = init.body ? JSON.parse(init.body) : {};
+    if (url.endsWith('/pages/' + D1) && (!init.method || init.method === 'GET')) return J(restaurant(D1, 'Casa X', { 'Auto booking': { select: { name: 'Books automatically' } }, 'Booking method': { select: { name: 'TheFork' } }, 'Booking link': { url: 'https://widget.thefork.com/abc' } }));
+    if (url.endsWith('/pages/' + D2) && (!init.method || init.method === 'GET')) return J(restaurant(D2, 'Casa Y', { 'Auto booking': { select: { name: 'Needs card' } }, 'Booking method': { select: { name: 'TheFork' } }, 'Booking link': { url: 'https://widget.thefork.com/def' } }));
+    if (url.endsWith('/pages/' + D3) && (!init.method || init.method === 'GET')) return J(restaurant(D3, 'Casa Z', { 'Auto booking': { select: { name: 'Books automatically' } }, 'Booking method': { select: { name: 'CoverManager' } }, 'Booking link': { url: 'https://www.covermanager.com/reservation/module_restaurant/z/spanish' } }));
+    if (url.includes(`/databases/${BR}/query`)) return J({ results: brStore.filter(x => ['Pending', 'Working'].includes(x.properties.Status.select.name)), has_more: false });
+    if (url.endsWith('/v1/pages') && init.method === 'POST' && bd.parent?.database_id === BR) { const pg = { id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeee' + brStore.length, created_time: '2026-11-06T12:00:00Z', properties: plainify(bd.properties) }; brStore.push(pg); return J(pg); }
+    const bm = url.match(/\/pages\/(eeeeeeee-eeee-eeee-eeee-eeeeeeeeeee\d)$/);
+    if (bm) { const pg = brStore.find(x => x.id === bm[1]); if (!pg) return J({ message: 'gone' }, 404); if (init.method === 'PATCH') Object.assign(pg.properties, bd.properties); return J(pg); }
+  }
   if (url.includes('gmail.googleapis.com') && url.includes('messages?') && decodeURIComponent(url).includes('covermanager')) return J({ messages: BK.map(x => ({ id: x[0] })) });
   if (url.includes('gmail.googleapis.com') && /messages\/bk0000/.test(url)) { const x = BK.find(y => url.includes(y[0])); return J({ id: x[0], internalDate: String(Date.parse(x[1])), snippet: x[4].slice(0, 80), payload: { mimeType: 'text/plain', headers: [{ name: 'Subject', value: x[2] }, { name: 'From', value: x[3] }], body: { data: Buffer.from(x[4], 'utf8').toString('base64url') } } }); }
   if (url.includes('/calendars/primary/events?') && !init.method) return J({ items: decodeURIComponent(url).includes('q=Clara') ? [{ id: 'exist1', summary: '\u{1F37D} Clara Begur' }] : [] });
@@ -356,6 +369,28 @@ res = await post('/api/visits/add', { restaurantId: RID, name: 'Far Nomo', date:
 res = await post('/api/visits/delete', { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1' }); r = await res.json(); assert.equal(res.status, 200, JSON.stringify(r));
 assert.ok(calls.some(c => c.url.endsWith('/pages/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1') && c.init.method === 'PATCH' && JSON.parse(c.init.body).archived === true), 'deleting a visit archives it');
 res = await worker.fetch(new Request('https://x.test/api/visits/list', { method: 'POST', body: '{}', headers: { 'X-App-Key': 'sekret' } }), { ...env, NOTION_VISITS_DB: undefined }); assert.equal(res.status, 409);
+// ---- Booking requests
+const GUEST = { name: 'Test Guest', email: 'guest@example.com', phone: '+34 600 000 000' };
+const FUT = '2036-01-10', br = b => post('/api/bookreq/add', { restaurantId: D1, date: FUT, time: '21:00', people: 4, guest: GUEST, ...b });
+res = await br({}); r = await res.json(); assert.equal(res.status, 200, JSON.stringify(r));
+assert.equal(r.request.kind, 'Book', 'TheFork places are booked'); assert.equal(r.request.status, 'Pending'); assert.equal(r.existing, false);
+assert.equal(r.request.restaurant, 'Casa X'); assert.equal(r.request.date, FUT); assert.equal(r.request.time, '21:00'); assert.equal(r.request.people, 4);
+const stored = brStore[0].properties; assert.equal(stored['Guest email'].email, 'guest@example.com'); assert.equal(stored['Booking link'].url, 'https://widget.thefork.com/abc');
+res = await br({}); r = await res.json(); assert.equal(r.existing, true, 'an identical open request is not duplicated'); assert.equal(brStore.length, 1);
+res = await br({ time: '21:15' }); r = await res.json(); assert.equal(r.existing, false); assert.equal(brStore.length, 2, 'another time is a new request');
+res = await br({ kind: 'Check availability', time: '20:00' }); r = await res.json(); assert.equal(r.request.kind, 'Check availability');
+res = await br({ restaurantId: D3, time: '20:30' }); r = await res.json(); assert.equal(r.request.kind, 'Check availability', 'only TheFork is booked for real');
+res = await br({ restaurantId: D2 }); assert.equal(res.status, 409, 'places that need a card are refused');
+for (const bad of [{ restaurantId: 'nope' }, { date: 'tomorrow' }, { date: '2020-01-01' }, { time: '9pm' }, { people: 0 }, { people: 2.5 }, { people: 30 }, { guest: { ...GUEST, name: '' } }, { guest: { ...GUEST, email: 'nope' } }, { guest: { ...GUEST, phone: 'abc' } }]) assert.equal((await br(bad)).status, 400, JSON.stringify(bad));
+const firstId = brStore[0].id;
+res = await post('/api/bookreq/status', { ids: [firstId, 'bad', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeee9'] }); r = await res.json();
+assert.equal(res.status, 200); assert.equal(r.requests.length, 1, 'unknown ids are skipped'); assert.equal(r.requests[0].status, 'Pending');
+brStore[0].properties.Status = { select: { name: 'Done' } }; brStore[0].properties.Result = { rich_text: [{ plain_text: 'Booked.' }] };
+r = await (await post('/api/bookreq/status', { ids: [firstId] })).json(); assert.equal(r.requests[0].status, 'Done'); assert.equal(r.requests[0].result, 'Booked.');
+r = await (await post('/api/bookreq/cancel', { id: firstId })).json(); assert.equal(r.cancelled, false, 'a finished request cannot be cancelled'); assert.equal(r.request.status, 'Done');
+r = await (await post('/api/bookreq/cancel', { id: brStore[1].id })).json(); assert.equal(r.cancelled, true); assert.equal(r.request.status, 'Cancelled');
+assert.equal((await post('/api/bookreq/cancel', { id: 'x' })).status, 400);
+res = await worker.fetch(new Request('https://x.test/api/bookreq/status', { method: 'POST', body: '{}', headers: { 'X-App-Key': 'sekret' } }), { ...env, NOTION_BOOKREQ_DB: undefined }); assert.equal(res.status, 409);
 
 // ---- Booking emails -> calendar
 store.set('refreshToken:calendar', 'RT');

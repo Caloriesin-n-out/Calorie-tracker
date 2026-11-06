@@ -22,6 +22,8 @@
 //   POST /api/meetings/new -> create a meeting note in your Notion Meetings database
 //   POST /api/restaurants/list | update | add | archive -> favourites and wishlist places (Mesa app; wishlist = places not visited yet)
 //   POST /api/visits/list | add | delete -> the visit log (Mesa Visits database): date, what you ate, score; keeps each restaurant's Visits and Last visit up to date
+//   POST /api/bookreq/add -> {restaurantId, date, time, people, note?, guest:{name,email,phone}}, queues a booking or availability check for the Mac task
+//   POST /api/bookreq/status -> {ids}, POST /api/bookreq/cancel -> {id}
 //   POST /api/bookings/scan -> {days?}, reads booking emails (CoverManager, Myrestoo, TheFork) and adds, moves or removes the calendar events
 //   POST /api/restaurants/share -> {text, url}, add a place shared from Google Maps to the wishlist (skips places already listed)
 //   POST /api/crypto/search -> {symbols:[...]}, CoinMarketCap coins for those tickers (best rank first)
@@ -64,11 +66,11 @@ export default {
         if (url.pathname === '/api/calendar') return json(await calendar(env, url), 200, request, env);
         if (url.pathname === '/api/tasks') return json(await tasks(env, url), 200, request, env);
         if (url.pathname === '/api/mail/inbox') return json(await mailInbox(env), 200, request, env);
-        if (['/api/mail/threads', '/api/mail/message', '/api/calendar/add', '/api/meetings/new', '/api/crypto/search', '/api/crypto/quotes', '/api/restaurants/list', '/api/restaurants/update', '/api/restaurants/add', '/api/restaurants/archive', '/api/restaurants/share', '/api/visits/list', '/api/visits/add', '/api/visits/delete', '/api/bookings/scan'].includes(url.pathname)) {
+        if (['/api/mail/threads', '/api/mail/message', '/api/calendar/add', '/api/meetings/new', '/api/crypto/search', '/api/crypto/quotes', '/api/restaurants/list', '/api/restaurants/update', '/api/restaurants/add', '/api/restaurants/archive', '/api/restaurants/share', '/api/visits/list', '/api/visits/add', '/api/visits/delete', '/api/bookings/scan', '/api/bookreq/add', '/api/bookreq/status', '/api/bookreq/cancel'].includes(url.pathname)) {
           if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405, request, env);
           const body = await request.json().catch(() => ({}));
           const fn = { '/api/mail/threads': mailThreads, '/api/mail/message': mailMessage, '/api/calendar/add': calendarAdd, '/api/meetings/new': newMeeting, '/api/crypto/search': cryptoSearch, '/api/crypto/quotes': cryptoQuotes,
-            '/api/restaurants/list': restaurantList, '/api/restaurants/update': restaurantUpdate, '/api/restaurants/add': restaurantAdd, '/api/restaurants/archive': restaurantArchive, '/api/restaurants/share': restaurantShare, '/api/visits/list': visitList, '/api/visits/add': visitAdd, '/api/visits/delete': visitDelete, '/api/bookings/scan': bookingsScan }[url.pathname];
+            '/api/restaurants/list': restaurantList, '/api/restaurants/update': restaurantUpdate, '/api/restaurants/add': restaurantAdd, '/api/restaurants/archive': restaurantArchive, '/api/restaurants/share': restaurantShare, '/api/visits/list': visitList, '/api/visits/add': visitAdd, '/api/visits/delete': visitDelete, '/api/bookings/scan': bookingsScan, '/api/bookreq/add': bookreqAdd, '/api/bookreq/status': bookreqStatus, '/api/bookreq/cancel': bookreqCancel }[url.pathname];
           return json(await fn(env, body), 200, request, env);
         }
         if (url.pathname === '/api/brief') {
@@ -967,6 +969,61 @@ async function visitDelete(env, b) {
   const rid = mapVisit(await notion(env, `pages/${b.id}`)).restaurantId;
   await notion(env, `pages/${b.id}`, 'PATCH', { archived: true });
   return { restaurant: rid ? await syncRestaurantVisits(env, rid) : null };
+}
+
+/* ---------------- Booking requests: Mesa -> Notion queue -> the Mac task ---------------- */
+
+// Mesa writes a request row; a scheduled task on the Mac reads it, uses a real browser and writes the result back. Only places marked
+// "Books automatically" are accepted, and only TheFork places are booked for real; other engines get an availability check.
+function bookreqDb(env) {
+  if (!env.NOTION_BOOKREQ_DB) throw fail('Booking requests are not set up on the Worker yet (NOTION_BOOKREQ_DB).', 409, true);
+  return env.NOTION_BOOKREQ_DB;
+}
+export function mapBookReq(p) {
+  const pr = p.properties || {}, text = a => (a || []).map(t => t.plain_text).join('').trim();
+  return { id: p.id, restaurantId: text(pr['Restaurant id']?.rich_text), restaurant: text(pr.Restaurant?.rich_text), kind: pr.Kind?.select?.name || '', date: pr['Booking date']?.date?.start || '', time: text(pr.Time?.rich_text), people: pr.People?.number ?? 0, status: pr.Status?.select?.name || 'Pending', result: text(pr.Result?.rich_text), createdAt: p.created_time || '', handledAt: pr['Handled at']?.date?.start || '' };
+}
+async function bookreqAdd(env, b) {
+  const db = bookreqDb(env), bad = m => { throw fail(m, 400, true); };
+  if (!isPageId(b.restaurantId)) bad('Need a restaurant id.');
+  if (!isDate(b.date)) bad('Pick a date.');
+  if (b.date < new Date().toISOString().slice(0, 10)) bad('That date has passed.');
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(b.time || '')) bad('Pick a time.');
+  const people = Number(b.people); if (!Number.isInteger(people) || people < 1 || people > 20) bad('People is a whole number from 1 to 20.');
+  const g = b.guest || {}, gname = String(g.name || '').trim(), gemail = String(g.email || '').trim(), gphone = String(g.phone || '').trim();
+  if (!gname || gname.length > 80) bad('Add your name under Settings first.');
+  if (!isEmail(gemail)) bad('Add your email under Settings first.');
+  if (!isPhone(gphone)) bad('Add your phone number under Settings first.');
+  const note = String(b.note || '').trim().slice(0, 200);
+  let r; try { r = mapRestaurant(await notion(env, `pages/${b.restaurantId}`)); } catch (e) { throw restaurantHint(e); }
+  if (r.autoBooking !== 'Books automatically') throw fail('Mesa has not confirmed that this place can be booked automatically.', 409, true);
+  if (!isHttp(r.bookingLink)) throw fail('This place has no booking link saved.', 409, true);
+  const kind = r.method === 'TheFork' && b.kind !== 'Check availability' ? 'Book' : 'Check availability';
+  // an identical request that is still waiting or running is returned instead of creating a second one
+  const open = await notion(env, `databases/${db}/query`, 'POST', { page_size: 20, filter: { and: [{ property: 'Restaurant id', rich_text: { equals: b.restaurantId } }, { or: [{ property: 'Status', select: { equals: 'Pending' } }, { property: 'Status', select: { equals: 'Working' } }] }] } });
+  const same = (open.results || []).map(mapBookReq).find(x => x.date === b.date && x.time === b.time && x.people === people && x.kind === kind && ['Pending', 'Working'].includes(x.status));
+  if (same) return { request: same, existing: true };
+  const properties = {
+    Request: { title: [{ text: { content: `${kind === 'Book' ? 'Book' : 'Check'} ${r.name} · ${b.date} ${b.time} · ${people}`.slice(0, 150) } }] },
+    Restaurant: rtext(r.name, 100), 'Restaurant id': rtext(b.restaurantId, 60), 'Booking link': { url: r.bookingLink }, Kind: { select: { name: kind } },
+    'Booking date': { date: { start: b.date } }, Time: rtext(b.time, 5), People: { number: people }, Status: { select: { name: 'Pending' } },
+    'Guest name': rtext(gname, 80), 'Guest email': { email: gemail }, 'Guest phone': { phone_number: gphone }, Note: rtext(note),
+  };
+  const page = await notion(env, 'pages', 'POST', { parent: { database_id: db }, properties });
+  return { request: mapBookReq(page), existing: false };
+}
+async function bookreqStatus(env, b) {
+  bookreqDb(env);
+  const ids = (Array.isArray(b.ids) ? b.ids : []).filter(isPageId).slice(0, 10), out = [];
+  for (const id of ids) { try { out.push(mapBookReq(await notion(env, `pages/${id}`))); } catch { /* gone or not shared: skip */ } }
+  return { requests: out };
+}
+async function bookreqCancel(env, b) {
+  bookreqDb(env);
+  if (!isPageId(b.id)) throw fail('Need a request id.', 400, true);
+  const cur = mapBookReq(await notion(env, `pages/${b.id}`));
+  if (cur.status !== 'Pending') return { request: cur, cancelled: false };
+  return { request: mapBookReq(await notion(env, `pages/${b.id}`, 'PATCH', { properties: { Status: { select: { name: 'Cancelled' } } } })), cancelled: true };
 }
 
 /* ---------------- Booking emails -> calendar (Mesa) ---------------- */
