@@ -770,13 +770,17 @@ async function newMeeting(env, b) {
 
 const R_CITIES = ['Madrid', 'Costa Brava', 'Vienna'];
 const R_METHODS = ['CoverManager', 'Molzait', 'TheFork', 'Myrestoo', 'Agora POS', 'Own website', 'Phone', 'WhatsApp', 'Email', 'Walk-in', 'Unknown'];
-const R_CARDS = ['Unknown', 'No', 'Yes - guarantee', 'Yes - deposit'];
+const R_CARDS = ['Unknown', 'No', 'Yes - guarantee', 'Yes - deposit', 'No card before submit', 'Card guarantee', 'No card (tested slots)', 'Deposit'];
+// Mesa shows plain Yes / No / Unknown; the detailed Notion values are mapped here, in one place.
+const CARD_YES = ['Yes - guarantee', 'Yes - deposit', 'Card guarantee', 'Deposit'], CARD_NO = ['No', 'No card before submit', 'No card (tested slots)'];
+export const AUTO_YES = ['Books automatically', 'Pre-submit verified (no card)'];
+export const cardStatus = (card, auto) => CARD_YES.includes(card) || auto === 'Needs card' ? 'Yes' : CARD_NO.includes(card) ? 'No' : 'Unknown';
 const R_PRICES = ['€', '€€', '€€€', '€€€€'];
 const R_MEALS = ['Lunch', 'Dinner', 'Brunch'];
 const R_TAGS = ['Terrace', 'Sea view', 'Group-friendly', 'Kids welcome', 'Romantic', 'Special occasion', 'Casual', 'Fine dining', 'Vegetarian options', 'Dog-friendly', 'Quiet', 'Lively'];
 // Wishlist: a place you have not been to yet. Empty means a place you have been (a normal favourite); "I've been" simply clears it.
 const R_WISHLIST = ['Want to try', 'Booked'];
-const R_AUTO = ['Books automatically', 'Needs card', 'Captcha or block', 'Manual', 'No online booking', 'Not checked'];
+const R_AUTO = ['Books automatically', 'Needs card', 'Captcha or block', 'Manual', 'No online booking', 'Not checked', 'Pre-submit verified (no card)', 'Partly verified', 'Not verified - page issue', 'Request - restaurant confirms', 'Online unavailable in check'];
 
 export function mapRestaurant(p) {
   const pr = p.properties || {}, text = a => (a || []).map(t => t.plain_text).join('').trim();
@@ -789,6 +793,8 @@ export function mapRestaurant(p) {
     lastVisit: pr['Last visit']?.date?.start || null, visits: pr.Visits?.number ?? 0, rating: typeof pr['My rating']?.number === 'number' ? pr['My rating'].number : null,
     wishlist: pr.Wishlist?.select?.name || '', why: text(pr['Why / recommended by']?.rich_text), added: (p.created_time || '').slice(0, 10),
     autoBooking: pr['Auto booking']?.select?.name || '', autoNotes: text(pr['Auto booking notes']?.rich_text),
+    autoBook: AUTO_YES.includes(pr['Auto booking']?.select?.name || ''), cardStatus: cardStatus(pr['Card needed']?.select?.name || 'Unknown', pr['Auto booking']?.select?.name || ''),
+    address: text(pr.Address?.rich_text), hours: text(pr['Opening hours']?.rich_text), myNotes: text(pr['My notes']?.rich_text),
   };
 }
 
@@ -822,6 +828,9 @@ export function restaurantProps(b, creating = false) {
   if (has('why')) out['Why / recommended by'] = rtext(b.why);
   if (has('autoBooking')) { if (b.autoBooking && !R_AUTO.includes(b.autoBooking)) bad('Unknown auto booking status.'); out['Auto booking'] = { select: b.autoBooking ? { name: b.autoBooking } : null }; }
   if (has('autoNotes')) out['Auto booking notes'] = rtext(b.autoNotes);
+  if (has('address')) out.Address = rtext(b.address, 200);
+  if (has('hours')) out['Opening hours'] = rtext(b.hours, 700);
+  if (has('myNotes')) out['My notes'] = rtext(b.myNotes, 1900);
   if (has('rating')) { const n = b.rating === null || b.rating === '' ? null : Number(b.rating); if (n !== null && (!Number.isInteger(n) || n < 1 || n > 10)) bad('Your score is a whole number from 1 to 10.'); out['My rating'] = { number: n }; }
   if (has('visits')) { const n = Number(b.visits); if (!Number.isInteger(n) || n < 0 || n > 999) bad('Visits must be a whole number.'); out.Visits = { number: n }; }
   return out;
@@ -996,7 +1005,7 @@ async function bookreqAdd(env, b) {
   if (!isPhone(gphone)) bad('Add your phone number under Settings first.');
   const note = String(b.note || '').trim().slice(0, 200);
   let r; try { r = mapRestaurant(await notion(env, `pages/${b.restaurantId}`)); } catch (e) { throw restaurantHint(e); }
-  if (r.autoBooking !== 'Books automatically') throw fail('Mesa has not confirmed that this place can be booked automatically.', 409, true);
+  if (!r.autoBook) throw fail('Mesa has not confirmed that this place can be booked automatically.', 409, true);
   if (!isHttp(r.bookingLink)) throw fail('This place has no booking link saved.', 409, true);
   const kind = r.method === 'TheFork' && b.kind !== 'Check availability' ? 'Book' : 'Check availability';
   // an identical request that is still waiting or running is returned instead of creating a second one

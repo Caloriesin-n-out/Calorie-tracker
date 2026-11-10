@@ -283,7 +283,7 @@ assert.equal(store.get('lastError') ?? null, null, 'price problems never look li
 res = await post('/api/restaurants/list', {}); r = await res.json();
 assert.equal(res.status, 200, JSON.stringify(r)); assert.deepEqual(r.restaurants.map(x => x.name), ['Far Nomo', 'Filandón'], 'follows the pagination cursor');
 assert.deepEqual(r.restaurants[0], { id: 'r1', url: 'https://notion.so/r1', name: 'Far Nomo', city: 'Costa Brava', area: 'Llafranc', cuisine: 'Japanese', meals: ['Lunch'], tags: ['Sea view'], price: '', favourite: true, method: 'CoverManager',
-  bookingLink: 'https://book.example/far', platformId: '', website: '', phone: '+34 972 000 000', whatsapp: '', card: 'Unknown', policy: '', notes: '', lastVisit: null, visits: 0, wishlist: '', why: '', added: '2026-11-02', rating: null, autoBooking: '', autoNotes: '' });
+  bookingLink: 'https://book.example/far', platformId: '', website: '', phone: '+34 972 000 000', whatsapp: '', card: 'Unknown', policy: '', notes: '', lastVisit: null, visits: 0, wishlist: '', why: '', added: '2026-11-02', rating: null, autoBooking: '', autoNotes: '', autoBook: false, cardStatus: 'Unknown', address: '', hours: '', myNotes: '' });
 assert.equal((await req('/api/restaurants/list')).status, 405, 'POST only');
 res = await post('/api/restaurants/update', { id: RID, fields: { card: 'Yes - deposit', visits: 2, lastVisit: '2026-11-07', policy: 'EUR 20 per person' } }); r = await res.json();
 assert.equal(res.status, 200, JSON.stringify(r)); assert.equal(r.restaurant.card, 'Yes - deposit'); assert.equal(r.restaurant.visits, 2);
@@ -355,6 +355,15 @@ assert.equal(mapRestaurant({ id: 'z', properties: { Name: { title: [{ plain_text
 assert.deepEqual(restaurantProps({ autoBooking: 'Books automatically', autoNotes: 'ok' })['Auto booking'], { select: { name: 'Books automatically' } });
 assert.deepEqual(restaurantProps({ autoBooking: '' })['Auto booking'], { select: null });
 assert.throws(() => restaurantProps({ autoBooking: 'Magic' }), /Unknown auto booking status/);
+assert.equal(restaurantProps({ autoBooking: 'Partly verified' })['Auto booking'].select.name, 'Partly verified', 'the stricter statuses are accepted');
+assert.equal(restaurantProps({ card: 'Card guarantee' })['Card needed'].select.name, 'Card guarantee');
+const info = mapRestaurant({ id: 'i', properties: { Name: { title: [{ plain_text: 'I' }] }, Address: { rich_text: [{ plain_text: 'Calle X 1, Madrid' }] }, 'Opening hours': { rich_text: [{ plain_text: 'Mon-Fri 13-16' }] }, 'My notes': { rich_text: [{ plain_text: 'Order the croquetas' }] } } });
+assert.equal(info.address, 'Calle X 1, Madrid'); assert.equal(info.hours, 'Mon-Fri 13-16'); assert.equal(info.myNotes, 'Order the croquetas');
+assert.deepEqual(restaurantProps({ address: 'A 1', hours: 'H', myNotes: 'N' }), { Address: { rich_text: [{ text: { content: 'A 1' } }] }, 'Opening hours': { rich_text: [{ text: { content: 'H' } }] }, 'My notes': { rich_text: [{ text: { content: 'N' } }] } });
+const cstat = (card, auto) => mapRestaurant({ id: 'c', properties: { Name: { title: [{ plain_text: 'C' }] }, 'Card needed': { select: { name: card } }, 'Auto booking': { select: { name: auto } } } });
+assert.equal(cstat('Card guarantee', 'Needs card').cardStatus, 'Yes'); assert.equal(cstat('Deposit', 'Needs card').cardStatus, 'Yes'); assert.equal(cstat('Unknown', 'Needs card').cardStatus, 'Yes', 'needs card wins over unknown');
+assert.equal(cstat('No card before submit', 'Pre-submit verified (no card)').cardStatus, 'No'); assert.equal(cstat('No card (tested slots)', 'Partly verified').cardStatus, 'No'); assert.equal(cstat('Unknown', 'Partly verified').cardStatus, 'Unknown');
+assert.equal(cstat('No', 'Books automatically').autoBook, true); assert.equal(cstat('No', 'Pre-submit verified (no card)').autoBook, true); assert.equal(cstat('No', 'Partly verified').autoBook, false); assert.equal(cstat('Unknown', 'Not checked').autoBook, false);
 // ---- Visit log
 res = await post('/api/visits/list', {}); r = await res.json();
 assert.equal(res.status, 200, JSON.stringify(r)); assert.equal(r.visits.length, 2); assert.equal(r.visits[0].date, '2026-11-02', 'newest first'); assert.deepEqual(r.visits[0], { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb2', restaurantId: RID, date: '2026-11-02', ate: 'Gyoza', rating: 9, notes: '' });
