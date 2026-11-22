@@ -777,7 +777,7 @@ export const AUTO_YES = ['Books automatically', 'Pre-submit verified (no card)']
 export const cardStatus = (card, auto) => CARD_YES.includes(card) || auto === 'Needs card' ? 'Yes' : CARD_NO.includes(card) ? 'No' : 'Unknown';
 const R_PRICES = ['€', '€€', '€€€', '€€€€'];
 const R_MEALS = ['Lunch', 'Dinner', 'Brunch'];
-const R_TAGS = ['Terrace', 'Sea view', 'Group-friendly', 'Kids welcome', 'Romantic', 'Special occasion', 'Casual', 'Fine dining', 'Vegetarian options', 'Dog-friendly', 'Quiet', 'Lively'];
+const R_TAGS = ['Outdoors', 'Terrace', 'Sea view', 'Group-friendly', 'Kids welcome', 'Romantic', 'Special occasion', 'Casual', 'Fine dining', 'Vegetarian options', 'Dog-friendly', 'Quiet', 'Lively'];
 // Wishlist: a place you have not been to yet. Empty means a place you have been (a normal favourite); "I've been" simply clears it.
 const R_WISHLIST = ['Want to try', 'Booked'];
 const R_AUTO = ['Books automatically', 'Needs card', 'Captcha or block', 'Manual', 'No online booking', 'Not checked', 'Pre-submit verified (no card)', 'Partly verified', 'Not verified - page issue', 'Request - restaurant confirms', 'Online unavailable in check'];
