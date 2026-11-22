@@ -1,5 +1,7 @@
 # Calorie tracker
 
+> Worker deployment is intentionally blocked pending verification of the existing MesaStore migration history. The active source is recovered from production. See [worker/DEPLOYMENT.md](worker/DEPLOYMENT.md) before using any deployment instructions below. Do not create replacement storage.
+
 A small personal app for an Android phone: log what you eat in a few taps, see it next to the calories your Fitbit Air says you burned, plus steps, sleep and resting heart rate.
 
 | Part | Where it lives | What it does |
@@ -13,7 +15,7 @@ A small personal app for an Android phone: log what you eat in a few taps, see i
 Google switches off the legacy Fitbit Web API on **2 Nov 2026**. Fitbit Air data is only available through the **Google Health API**, so that is what the Worker uses. Google said in May it was "not currently onboarding new projects", so step 2 below is the one that might block you. See "Not yet verified".
 
 ## Updating the app (automatic)
-Any change pushed to `main` is published by GitHub Pages in 1 to 2 minutes. The service worker is network-first, so a reload picks it up. Bump `BUILD` in `index.html` so Settings shows which version the phone is running. The Worker (`worker/`) changes rarely and is redeployed by hand with `wrangler deploy`.
+Any change pushed to `main` is published by GitHub Pages in 1 to 2 minutes. The service worker is network-first, so a reload picks it up. Bump `BUILD` in `index.html` so Settings shows which version the phone is running. The Worker (`worker/`) is not deployed by Pages. Its default deployment path is currently blocked; see `worker/DEPLOYMENT.md`.
 
 ## One-time setup
 
@@ -32,18 +34,9 @@ Any change pushed to `main` is published by GitHub Pages in 1 to 2 minutes. The 
 
 > **7-day expiry:** while the consent screen is in *Testing*, Google ends the connection every 7 days and you tap "Connect Google Health" again. Setting the status to **In production** (you can leave it unverified; you just click through an "unverified app" warning) stops that.
 
-### 3. Deploy the Worker
-```bash
-cd worker
-npx wrangler login
-npx wrangler kv namespace create TOKENS      # paste the id into wrangler.toml
-# also set ALLOWED_ORIGIN in wrangler.toml to https://<owner>.github.io  (origin only, no path)
-npx wrangler secret put GOOGLE_CLIENT_ID
-npx wrangler secret put GOOGLE_CLIENT_SECRET
-npx wrangler secret put APP_KEY              # a long passphrase of your choosing; it protects your health data
-npx wrangler deploy
-```
-`deploy` prints the Worker address. Make sure the redirect URI from step 2.5 matches it exactly.
+### 3. Worker deployment is blocked
+
+This is an existing service with live KV and Durable Object storage. Do not follow a fresh-install namespace creation or deployment flow. See [the deployment gate](worker/DEPLOYMENT.md) for the recovered source, preserved binding identities and checks required before any later deployment.
 
 ### 4. Install on your Pixel and connect
 1. Open the app address in Chrome. Close the tab, reopen, reload twice, then **⋮ → Install app**.
