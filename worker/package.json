@@ -1,5 +1,9 @@
 {
   "private": true,
   "type": "module",
-  "scripts": { "test": "node tests/worker.test.mjs" }
+  "scripts": {
+    "test": "node tests/source-safety.test.mjs && node tests/worker.test.mjs && node tests/shared-backend.test.mjs && node tests/shared-routes.test.mjs",
+    "check:source": "node tests/source-safety.test.mjs",
+    "deploy": "node scripts/deploy-blocked.mjs"
+  }
 }

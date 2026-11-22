@@ -1,0 +1,9 @@
+{
+  "observed_at": "2026-11-22T17:07:27.02401Z",
+  "source_sha256": "1e305895c180bb7ad7b626ada892df60f3190a018566193a9fb458d43f2b1642",
+  "source_bytes": 141607,
+  "service": "calorie-tracker",
+  "environment": "production",
+  "migration_history_verified": false,
+  "deployment_enabled": false
+}

@@ -1,0 +1,81 @@
+{
+  "placement": {},
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": [],
+  "usage_model": "standard",
+  "tags": [],
+  "tail_consumers": [],
+  "logpush": false,
+  "annotations": {
+    "workers/message": "Isolated shared Google Tasks and read-only calendar, preserve existing service",
+    "workers/triggered_by": "upload"
+  },
+  "bindings": [
+    {
+      "name": "ALLOWED_ORIGIN",
+      "text": "https://caloriesin-n-out.github.io,https://mydayappmh.github.io,https://restaurantsmh.github.io",
+      "type": "plain_text"
+    },
+    {
+      "name": "APP_KEY",
+      "type": "secret_text"
+    },
+    {
+      "name": "CMC_API_KEY",
+      "type": "secret_text"
+    },
+    {
+      "name": "GOOGLE_CLIENT_ID",
+      "type": "secret_text"
+    },
+    {
+      "name": "GOOGLE_CLIENT_SECRET",
+      "type": "secret_text"
+    },
+    {
+      "class_name": "MesaStore",
+      "name": "MESA_STORE",
+      "namespace_id": "e6e65d1561a84563a115add97010fc5a",
+      "type": "durable_object_namespace"
+    },
+    {
+      "name": "NOTION_BOOKREQ_DB",
+      "text": "c513574b-9b1f-42d0-9cd1-8f901d56099c",
+      "type": "plain_text"
+    },
+    {
+      "name": "NOTION_MEETINGS_DB",
+      "text": "6311b063-37a4-468b-b661-111f32c063b2",
+      "type": "plain_text"
+    },
+    {
+      "name": "NOTION_PEOPLE_DB",
+      "text": "1af97b4b-1373-4867-b105-b6afc71ff37f",
+      "type": "plain_text"
+    },
+    {
+      "name": "NOTION_RESTAURANTS_DB",
+      "text": "f5ce7d95-2e83-46f0-a0f4-3e7e441f632f",
+      "type": "plain_text"
+    },
+    {
+      "name": "NOTION_TASKS_DB",
+      "text": "2e2e528f-adf8-8195-bced-f39c537ae294",
+      "type": "plain_text"
+    },
+    {
+      "name": "NOTION_TOKEN",
+      "type": "secret_text"
+    },
+    {
+      "name": "NOTION_VISITS_DB",
+      "text": "54f5007a-41c1-463d-9fe3-1f4939d31fa6",
+      "type": "plain_text"
+    },
+    {
+      "name": "TOKENS",
+      "namespace_id": "e8a0c8c2d28a41de916384984081917d",
+      "type": "kv_namespace"
+    }
+  ]
+}

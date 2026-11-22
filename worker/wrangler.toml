@@ -1,5 +1,7 @@
 name = "calorie-tracker"
-main = "worker.js"
+# Intentionally missing input: direct Wrangler deployment must fail until the gate below is resolved.
+# See DEPLOYMENT.md. Do not create this file or change main just to bypass the guard.
+main = "DEPLOYMENT-BLOCKED-see-DEPLOYMENT.md.mjs"
 compatibility_date = "2026-10-01"
 
 [vars]
@@ -14,7 +16,14 @@ NOTION_VISITS_DB = "54f5007a-41c1-463d-9fe3-1f4939d31fa6"
 NOTION_BOOKREQ_DB = "c513574b-9b1f-42d0-9cd1-8f901d56099c"
 # SCOPES = "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly ..."   # only if Google rejects the defaults
 
-# Create with:  npx wrangler kv namespace create TOKENS   then paste the id here
+# Existing namespace. Never create or substitute a namespace for this service.
 [[kv_namespaces]]
 binding = "TOKENS"
 id = "e8a0c8c2d28a41de916384984081917d"
+
+# Binding observed on the existing production Worker. Namespace identity is recorded
+# in deployment/observed-settings-2026-11-22.json. Migration history is unresolved.
+# No migration is invented here. Deployment remains deliberately disabled.
+[[durable_objects.bindings]]
+name = "MESA_STORE"
+class_name = "MesaStore"
